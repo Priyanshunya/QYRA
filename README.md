@@ -16,17 +16,12 @@ Conventional health wearables suffer from cloud-dependency and single-sensor ala
 
 ## 🛠️ System Architecture & Tech Stack
 
-```text
- 1. [ SENSE ] ──> MAX86141 (SpO2/HR) | GSR | LSM6DSOX (IMU) | BME688 (Gas) | TMP117 (Temp)
-       │
-       ▼
- 2. [ COMPUTE ] ──> ESP32-S3 running FreeRTOS (Dual-Bus Sensor Isolation)
-       │
-       ▼
- 3. [ AI INFERENCE ] ──> INT8 Quantized TinyML (<100KB) + Motion-Aware CMSIS-DSP Filtering
-       │
-       ▼
- 4. [ ACTION & ALERT ] ──> Local OLED + Buzzer | Flutter Mobile App | SX1262 LoRa (IN865)```
+> **1. [ SENSE ]** ──> MAX86141 (SpO2/HR) | GSR | LSM6DSOX (IMU) | BME688 (Gas) | TMP117 (Temp)  
+> **2. [ COMPUTE ]** ──> ESP32-S3 running FreeRTOS (Dual-Bus Sensor Isolation)  
+> **3. [ AI INFERENCE ]** ──> INT8 Quantized TinyML (<100KB) + Motion-Aware CMSIS-DSP Filtering  
+> **4. [ ACTION & ALERT ]** ──> Local OLED + Buzzer | Flutter Mobile App | SX1262 LoRa (IN865)
+
+---
 
 * **Microcontroller:** ESP32-S3 (Bench Prototype) / Qualcomm QCC748M (Production Target Roadmap).
 * **RTOS:** FreeRTOS with dual-bus sensor isolation (Clinical high-speed sensors on SPI/I2C Bus 0; Environmental/UI on Bus 1) to eliminate bus-choking and sustain real-time biometric polling.
