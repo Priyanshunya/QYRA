@@ -26,7 +26,7 @@ Conventional health wearables suffer from cloud-dependency and single-sensor ala
  3. [ AI INFERENCE ] ──> INT8 Quantized TinyML (<100KB) + Motion-Aware CMSIS-DSP Filtering
        │
        ▼
- 4. [ ACTION & ALERT ] ──> Local OLED + Buzzer | Flutter Mobile App | SX1262 LoRa (IN865)
+ 4. [ ACTION & ALERT ] ──> Local OLED + Buzzer | Flutter Mobile App | SX1262 LoRa (IN865)```
 
 * **Microcontroller:** ESP32-S3 (Bench Prototype) / Qualcomm QCC748M (Production Target Roadmap).
 * **RTOS:** FreeRTOS with dual-bus sensor isolation (Clinical high-speed sensors on SPI/I2C Bus 0; Environmental/UI on Bus 1) to eliminate bus-choking and sustain real-time biometric polling.
