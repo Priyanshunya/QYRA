@@ -17,7 +17,6 @@ Conventional health wearables suffer from cloud-dependency and single-sensor ala
 ## 🛠️ System Architecture & Tech Stack
 
 ```text
-```text
  1. [ SENSE ] ──> MAX86141 (SpO2/HR) | GSR | LSM6DSOX (IMU) | BME688 (Gas) | TMP117 (Temp)
        │
        ▼
