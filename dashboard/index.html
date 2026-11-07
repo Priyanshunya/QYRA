@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>QYRA Mobile Companion - V1 (Live Telemetry)</title>
+    <title>QYRA Mobile Companion - V1</title>
     
+    <!-- pulling tailwind from cdn just for the bench prototype so we dont have to compile css yet -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -40,6 +41,8 @@
     </script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Fira+Code:wght@400;600&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    
+    <!-- using chartjs for the live telemetry plotting, will probably switch to fl_chart when we move to flutter -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <style>
@@ -56,7 +59,6 @@
             transition: background-color 0.3s ease;
         }
         
-        /* I added this wrapper to make the web app look like a physical phone screen when viewed on a desktop monitor */
         .app-container { 
             width: 100%;
             max-width: 480px; 
@@ -104,7 +106,7 @@
         }
         html.dark .user-card { background: #0b1320; border-color: #1e293b; }
 
-        /* Navigation view handling. Only the active view gets display:block */
+        /* basic tab routing css so we dont have to load react router for a simple prototype */
         .view-content { display: none; flex: 1; overflow-y: auto; padding-bottom: 90px; }
         .view-content.active { display: block; animation: fadeUp 0.3s ease forwards; }
 
@@ -125,7 +127,7 @@
 
     <div class="app-container text-slate-900 dark:text-slate-50">
         
-        <!-- Top App Bar -->
+        <!-- app bar -->
         <header class="pt-10 sm:pt-6 pb-3 px-5 flex justify-between items-center shrink-0 z-40 bg-white/90 dark:bg-darkbg/90 backdrop-blur-xl border-b border-slate-200 dark:border-darkborder sticky top-0 transition-colors">
             <div class="flex items-center gap-2">
                 <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 text-white">
@@ -147,7 +149,7 @@
                     <button id="lang-btn" class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-darkcard text-slate-700 dark:text-slate-300 text-xs font-semibold">
                         <i class="ph ph-globe"></i> <span id="current-lang">EN</span>
                     </button>
-                    <!-- Drops down the available localized languages -->
+                    <!-- simple dropdown for the multi-language voice alerts -->
                     <div id="lang-dropdown" class="absolute right-0 mt-2 w-32 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 hidden flex-col overflow-hidden z-50">
                         <button class="lang-opt px-4 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700 w-full" data-lang="en">English</button>
                         <button class="lang-opt px-4 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700 w-full" data-lang="hi">हिन्दी</button>
@@ -155,8 +157,8 @@
                     </div>
                 </div>
 
-                <!-- WebBLE connection status area -->
                 <div class="flex items-center gap-1">
+                    <!-- this only unhides once the tp4056 adc sends a valid battery level -->
                     <div id="battery-badge" class="hidden items-center gap-0.5 px-1.5 py-1 rounded-md bg-slate-100 dark:bg-slate-800 text-[9px] font-mono font-bold text-slate-600 dark:text-slate-300">
                         <i class="ph-fill ph-battery-medium text-emerald-500" id="bat-icon"></i><span id="bat-text">--%</span>
                     </div>
@@ -167,8 +169,9 @@
             </div>
         </header>
 
-        <!-- Main Home View (User Overview) -->
+        <!-- home view (simple triage dashboard for the user) -->
         <main id="view-user" class="view-content active px-5 pt-4 pb-24">
+            
             <div id="user-alert-container" class="mb-4 flex flex-col gap-2"></div>
 
             <div class="flex justify-center mb-6 mt-4 relative">
@@ -219,7 +222,7 @@
             </div>
         </main>
 
-        <!-- Sensors View (Raw Data from the ESP32) -->
+        <!-- raw sensors view (mostly for debugging the payload from the ESP32) -->
         <main id="view-pro-sensors" class="view-content px-4 pt-4 pb-24">
             
             <div class="flex justify-between items-center mb-3 px-1">
@@ -227,7 +230,7 @@
                 <span class="text-[9px] bg-slate-200 dark:bg-slate-800 text-slate-500 px-2 py-1 rounded font-mono transition-colors">Threshold Rules Active <i class="ph-fill ph-cpu"></i></span>
             </div>
 
-            <!-- The 6 main sensor gauges -->
+            <!-- main 6-panel grid -->
             <div class="grid grid-cols-2 gap-3 mb-4">
                 
                 <div class="pro-card flex flex-col items-center justify-center p-3">
@@ -315,7 +318,7 @@
                     </div>
                 </div>
 
-                <!-- Environment Data uses a text grid instead of a gauge -->
+                <!-- environment data gets a text grid since there are too many variables for one gauge -->
                 <div class="pro-card flex flex-col justify-between p-3">
                     <div class="flex justify-between items-center mb-2">
                         <h3 class="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">Environment</h3>
@@ -342,7 +345,6 @@
                 </div>
             </div>
 
-            <!-- We use Chart.js here to plot the arrays we receive over BLE -->
             <div class="pro-card mb-4">
                 <div class="flex justify-between items-start mb-3">
                     <div>
@@ -361,7 +363,7 @@
                 </div>
             </div>
 
-            <!-- A live view of the RTOS tasks doing their job -->
+            <!-- console output to make sure the rtos tasks aren't choking -->
             <div class="pro-card bg-slate-900 text-cyan-400 font-mono text-[10px] p-3 rounded-xl border border-slate-800 mb-4 shadow-inner">
                 <div class="flex justify-between items-center mb-2 border-b border-slate-800 pb-1.5">
                     <span class="font-bold uppercase tracking-widest text-slate-300 flex items-center gap-1"><i class="ph-fill ph-terminal text-cyan-400"></i> Firmware Telemetry Log</span>
@@ -372,7 +374,7 @@
                 </div>
             </div>
 
-            <!-- This grid maps directly to the boolean hardware flags (hasBME, hasMPU) from the C++ firmware -->
+            <!-- this grid maps to the boolean fault flags in our c++ code so we know if a sensor came loose on the breadboard -->
             <div class="pro-card p-3">
                 <h3 class="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-widest flex items-center gap-1.5 mb-3"><i class="ph-fill ph-cpu text-cyan-500"></i> Hardware Diagnostics</h3>
                 <div class="grid grid-cols-2 gap-2">
@@ -398,17 +400,32 @@
                         </div>
                     </div>
                     <div class="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-2 rounded-lg flex items-center gap-2">
+                        <div id="diag-mlx-dot" class="w-2 h-2 rounded-full bg-slate-400"></div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-700 dark:text-slate-300 block leading-tight">MLX90614</span>
+                            <span class="text-[8px] text-slate-400">I2C 0x5A</span>
+                        </div>
+                    </div>
+                    <div class="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-2 rounded-lg flex items-center gap-2">
                         <div id="diag-lora-dot" class="w-2 h-2 rounded-full bg-emerald-500"></div>
                         <div>
                             <span class="text-[10px] font-bold text-slate-700 dark:text-slate-300 block leading-tight">LoRa RF</span>
                             <span class="text-[8px] text-slate-400">SPI 865MHz</span>
                         </div>
                     </div>
+                    <!-- tracking the tp4056 output on pin 7 -->
+                    <div class="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-2 rounded-lg flex items-center gap-2">
+                        <div id="diag-adc-dot" class="w-2 h-2 rounded-full bg-emerald-500"></div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-700 dark:text-slate-300 block leading-tight">TP4056 Bat</span>
+                            <span class="text-[8px] text-slate-400">ADC Pin 7</span>
+                        </div>
+                    </div>
                 </div>
             </div>
         </main>
 
-        <!-- Disaster Hub (LoRa Mesh Operations) -->
+        <!-- Disaster Hub (LoRa operations) -->
         <main id="view-pro-disaster" class="view-content px-4 pt-4 pb-24">
             <div class="flex justify-between items-center mb-4 px-1">
                 <div class="flex items-center gap-2">
@@ -418,7 +435,7 @@
                 <span class="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/30 px-2 py-1 rounded border border-emerald-200 dark:border-emerald-800/50">865 MHz P2P</span>
             </div>
 
-            <!-- GPS sync uses the real HTML5 Geolocation API -->
+            <!-- pulling real gps from the browser so the lora packet actually has valid coordinates to broadcast -->
             <div class="pro-card mb-3 bg-slate-50 dark:bg-slate-800/50 p-3">
                  <div class="flex justify-between items-center mb-2">
                     <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1"><i class="ph-fill ph-crosshair"></i> My Rescue Node</h3>
@@ -436,11 +453,12 @@
             <p class="text-[9px] text-slate-500 dark:text-slate-400 text-center px-4">Incoming peer-to-peer LoRa distress signals will automatically render here during emergency events.</p>
         </main>
 
-        <!-- Settings & Data Export -->
+        <!-- Settings tab -->
         <main id="view-settings" class="view-content px-4 pt-4 pb-24">
             <h2 class="text-sm font-black text-slate-800 dark:text-white uppercase tracking-widest mb-4 px-1" data-i18n="systemSettings">System Settings</h2>
             
             <div class="space-y-3">
+                
                 <div class="pro-card p-4">
                     <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3" data-i18n="devConn">Device & Connection</h3>
                     <div class="flex justify-between items-center py-2 border-b border-slate-100 dark:border-slate-800">
@@ -478,7 +496,7 @@
                     <p class="text-[9px] text-slate-400 mt-2 leading-tight">Data is strictly saved to this device's local browser memory to comply with DPDP. No cloud sync is active.</p>
                 </div>
 
-                <!-- We export directly to a blob URL so we don't need a backend server to generate the CSV -->
+                <!-- csv exporter built for offline analysis without any backend dependencies -->
                 <div class="pro-card p-4">
                     <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3">Export Telemetry</h3>
                     <p class="text-[9px] text-slate-400 mb-4 leading-tight">Download locally saved sensor telemetry in CSV format for offline analysis.</p>
@@ -496,7 +514,7 @@
             </div>
         </main>
 
-        <!-- Threshold Edit Modal (Pops up when you click the gear icon on a sensor) -->
+        <!-- threshold config modal (pops up when clicking the gear icon on the sensor cards) -->
         <div id="thresholdModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-end sm:items-center justify-center p-0 sm:p-4">
             <div class="bg-white dark:bg-darkcard w-full max-w-sm rounded-t-3xl sm:rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-2xl animate-fadeUp">
                 <div class="flex justify-between items-center mb-4">
@@ -530,7 +548,7 @@
             </div>
         </div>
 
-        <!-- Sticky Bottom Navigation -->
+        <!-- sticky bottom nav -->
         <nav id="bottom-nav" class="absolute bottom-0 w-full bg-white/90 dark:bg-darkbg/95 backdrop-blur-xl border-t border-slate-200 dark:border-darkborder flex justify-around items-center pt-3 pb-8 z-40 shrink-0 transition-colors">
             <button class="nav-btn flex flex-col items-center gap-1 w-16 text-slate-400 hover:text-cyan-500 transition-colors active" data-target="view-user" id="nav-btn-home">
                 <i class="ph-fill ph-house text-2xl"></i>
@@ -552,21 +570,19 @@
     </div>
 
     <script>
-        // Global state variables for the dashboard
+        // core state flags
         let isDeviceWorn = false;
         let currentLang = 'en';
         
-        // PHI Privacy State (True masks the value behind a "SECURE" badge)
+        // privacy toggle state. if true, it masks the raw value on the UI behind a "SECURE" badge.
         let phiMasks = { st: true, gsr: true, hr: true, spo2: true }; 
         
-        // --- LOCAL STORAGE DATA LOGGER ---
-        // I had to wrap this in a try-catch because some browsers (like Safari or strict iframes) 
-        // block localStorage and it was crashing the whole app during tests.
+        // had to wrap local storage in a try-catch because running this file from a strict iframe blocks access and crashes the script
         let localDataLog = [];
         try {
             localDataLog = JSON.parse(localStorage.getItem('qyra_telemetry')) || [];
         } catch(e) {
-            console.warn("Local storage disabled by browser settings.");
+            console.warn("local storage is disabled by your browser settings.");
         }
         
         const localStoreToggle = document.getElementById('toggle-local-storage');
@@ -584,9 +600,7 @@
             });
         }
 
-        // --- CSV EXPORT FUNCTION ---
-        // Simple CSV exporter. Instead of building a backend, we just dump the local array 
-        // to a Blob and trigger a download link. Super fast for offline analysis.
+        // lightweight csv exporter. loops over the localDataLog array and dumps it to a blob.
         window.downloadData = function(timeframe) {
             let dataToExport = localDataLog;
             
@@ -618,7 +632,7 @@
             logToTerminal(`[Export] Successfully downloaded ${dataToExport.length} telemetry records.`, "good");
         };
         
-        // These thresholds align directly with the logic running in the ESP32 firmware
+        // these thresholds align directly with the logic running in the esp32 firmware
         let aiThresholds = {
             st: { val: 37.5, min: 25.0, max: 42.0, step: 0.1, desc: "Triggers Body Temp / Wellness alerts above this value." },
             gsr: { val: 1500, min: 100, max: 4000, step: 50, desc: "Triggers Sweaty/Profuse alerts above this skin conductance." },
@@ -650,7 +664,7 @@
         document.querySelectorAll('.lang-opt').forEach(opt => {
             opt.addEventListener('click', (e) => {
                 e.preventDefault();
-                e.stopPropagation(); // Prevents the document click listener from hiding it before we capture the value
+                e.stopPropagation(); // forces the ui text update to run before the dropdown hides
                 
                 currentLang = opt.getAttribute('data-lang');
                 const curLangEl = document.getElementById('current-lang');
@@ -659,14 +673,14 @@
                 langDropdown.classList.add('hidden'); 
                 updateLanguageUI();
                 
-                // If the device isn't connected yet, force a UI refresh so the standby strings update
+                // if ble hasn't streamed data yet, we force a re-render to update the standby labels
                 if (!isDeviceWorn) {
                     processIncomingData({});
                 }
             });
         });
 
-        // Tab Navigation Logic
+        // simple tab routing logic
         const navBtns = document.querySelectorAll('.nav-btn');
         const viewContents = document.querySelectorAll('.view-content');
 
@@ -689,6 +703,7 @@
             btn.onclick = () => switchTab(btn, btn.dataset.target);
         });
 
+        // translation maps for the ui elements
         const UI_I18N = {
             en: { 
                 optimal: "Optimal", allNormal: "All Systems Normal", sosBtn: "SOS EMERGENCY", aiPred: "Threshold Triage Status", 
@@ -757,13 +772,13 @@
 
         const TTS_LANG_MAP = { en: 'en-US', hi: 'hi-IN', ta: 'ta-IN' };
         
-        // Adding a small delay/debounce so the voice synthesis doesn't spam the user 
-        // if a sensor is fluctuating right on the threshold line.
+        // added a 30s debounce to ensure the text-to-speech doesn't trigger wildly 
+        // if a sensor reading jitters back and forth over a threshold limit.
         let lastAlertTimes = { fall: 0, heatstroke: 0, ventilation: 0, respiratory: 0, cardiac: 0, fever: 0, hypoxia: 0, lora_rx: 0 };
 
         function triggerAlert(alertType) {
             const now = Date.now();
-            if (now - lastAlertTimes[alertType] < 30000) return; // 30-second cooldown
+            if (now - lastAlertTimes[alertType] < 30000) return; 
             lastAlertTimes[alertType] = now;
 
             const text = VOICE_ALERTS['en'][alertType];
@@ -818,15 +833,14 @@
             if(!activeModalKey) return;
             aiThresholds[activeModalKey].val = parseFloat(document.getElementById('modalSlider').value);
             
-            // We flip the logic here: if the toggle is checked, the mask is FALSE (unlocked)
+            // we flip the logic here: if the toggle is checked, the mask is FALSE (meaning data is unlocked and visible)
             if(['st', 'gsr', 'hr', 'spo2'].includes(activeModalKey)) {
                 phiMasks[activeModalKey] = !document.getElementById('modalPhiToggle').checked; 
             }
             closeThresholdModal();
         };
 
-        // Using Chart.js here. I pre-filled the array with 50 zeroes so the chart 
-        // doesn't look empty and jumpy when it first loads.
+        // pre-filling the chart.js array with 50 zeroes so the ui doesn't look broken when it boots up empty
         let chartDataStore = { hr: Array(50).fill(0), st: Array(50).fill(0), gsr: Array(50).fill(0), z: Array(50).fill(0) };
         let currentChartKey = 'hr';
         
@@ -868,7 +882,7 @@
             multiChart.update();
         });
 
-        // Grabbing real GPS coords from the browser so the SOS feature has actual data to send.
+        // pulling physical gps coords using the browser api to prepare the sos payload
         if (navigator.geolocation) {
             navigator.geolocation.watchPosition((pos) => {
                 const locEl = document.getElementById('my-gps-cords');
@@ -885,12 +899,12 @@
         const BLE_CHARACTERISTIC_UUID = "19b10001-e8f2-537e-4f6c-d104768a1214";
         let bluetoothDevice;
 
-        // The Web Bluetooth API is strict. It requires a user gesture (like a button click) 
-        // to open the pairing menu. That's why we tie all initialization to this connect button.
+        // the web bluetooth api is strict. it requires a user gesture (like a button click) 
+        // to open the pairing menu. that's why we tie all initialization to this connect button.
         document.getElementById('ble-connect-btn').onclick = async () => {
             
-            // Browsers block audio until the user interacts with the page, so I'm playing 
-            // a silent sound here to unlock the TTS engine early for future emergency alerts.
+            // browsers block audio until the user interacts with the page, so we play 
+            // a silent sound here to unlock the tts engine early for future emergency alerts.
             if ('speechSynthesis' in window) {
                 let silent = new SpeechSynthesisUtterance('');
                 silent.volume = 0;
@@ -954,6 +968,7 @@
             
             div.innerHTML = msg;
             term.prepend(div);
+            // keep the console clean so it doesnt lag the browser
             if(term.children.length > 20) term.lastChild.remove();
         }
 
@@ -965,7 +980,7 @@
             circle.style.strokeDashoffset = circumference - (pct * circumference);
         }
 
-        // OTA Sync / Apply Thresholds Simulator
+        // simulates passing updated settings blocks via BLE back down to the hardware
         const otaBtn = document.getElementById('btn-ota-sync');
         if (otaBtn) {
             otaBtn.onclick = () => {
@@ -991,7 +1006,7 @@
         }
 
         window.triggerLoRaSOS = function() {
-            if(!bluetoothDevice) return; // We can't tell the ESP32 to broadcast if it's not connected over BLE
+            if(!bluetoothDevice) return; // cant tell the esp32 to broadcast if its not connected over ble
             const btn = document.getElementById('lora-sos-btn');
             const homeBtn = document.getElementById('btn-sos-user');
             
@@ -1028,10 +1043,11 @@
         };
 
         function processIncomingData(data) {
-            // We check if the IR value from the MAX30102 drops. If it's below 50k, the watch is probably off the wrist.
+            
+            // we check if the IR value from the MAX30102 drops. if it's below 50k, the watch is probably off the wrist.
             isDeviceWorn = (data.ir !== undefined && data.ir > 50000); 
 
-            // We log data every 5 seconds. If we log at 10Hz (the BLE rate), the browser runs out of memory real quick.
+            // write to LocalStorage at a throttled 0.2Hz rate to prevent browser lockups from the fast 10Hz BLE stream
             if (isLoggingEnabled && isDeviceWorn) {
                 const now = Date.now();
                 if (now - lastLogTime > 5000) {
@@ -1047,7 +1063,6 @@
                             voc: data.g ? data.g.toFixed(1) : "--"
                         };
                         localDataLog.push(logEntry);
-                        // Hard cap at 10,000 recent data points to prevent the browser from lagging
                         if (localDataLog.length > 10000) localDataLog.shift();
                         localStorage.setItem('qyra_telemetry', JSON.stringify(localDataLog));
                     } catch(e) {} 
@@ -1065,12 +1080,15 @@
                 if(batIcon) batIcon.className = data.bat > 20 ? "ph-fill ph-battery-medium text-emerald-500" : "ph-fill ph-battery-warning text-rose-500 animate-pulse";
             }
 
+            // mapping the hardware fault flags directly to visual dot indicators
             const bmeDot = document.getElementById('diag-bme-dot');
             if(bmeDot) bmeDot.className = data.bme ? "w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "w-2 h-2 rounded-full bg-rose-500";
             const maxDot = document.getElementById('diag-max-dot');
             if(maxDot) maxDot.className = data.max ? "w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "w-2 h-2 rounded-full bg-rose-500";
             const mpuDot = document.getElementById('diag-mpu-dot');
             if(mpuDot) mpuDot.className = data.mpu ? "w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "w-2 h-2 rounded-full bg-rose-500";
+            const mlxDot = document.getElementById('diag-mlx-dot');
+            if(mlxDot) mlxDot.className = data.mlx ? "w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "w-2 h-2 rounded-full bg-rose-500";
 
             let gsrInsight = "OFF-WRIST";
             if(isDeviceWorn && data.gsr !== undefined) {
@@ -1111,20 +1129,21 @@
                     userPredZ.className = (zInsight==="IMPACT") ? "text-lg font-black uppercase text-rose-500 mt-1" : "text-lg font-black uppercase text-emerald-500 mt-1";
                 }
 
+                // Core triage engine evaluation. we check combined states to avoid false positive triggers.
                 let heatstrokeTriggered = false;
 
                 if (data.z !== undefined && data.z > aiThresholds.z.val) {
                     triggerAlert('fall');
-                    logToTerminal(`[ALERT] Fall Impact detected!`, "alert");
+                    logToTerminal(`[ALERT] Fall Impact threshold breached!`, "alert");
                 }
                 if (data.st !== undefined && data.st > aiThresholds.st.val && data.gsr !== undefined && data.gsr > (aiThresholds.gsr.val * 0.5) && data.bpm !== undefined && data.bpm > aiThresholds.hr.val) {
                     triggerAlert('heatstroke');
-                    logToTerminal(`[ALERT] Severe Heat Strain Threshold Breached!`, "alert");
+                    logToTerminal(`[ALERT] High body temp + sweat + elevated pulse.`, "alert");
                     heatstrokeTriggered = true;
                 }
                 if (data.st !== undefined && data.st > aiThresholds.st.val && data.h !== undefined && data.h > 75) {
                     triggerAlert('ventilation');
-                    logToTerminal(`[ALERT] High Humidity/Heat block detected!`, "alert");
+                    logToTerminal(`[ALERT] High ambient temp + high humidity detected.`, "alert");
                     heatstrokeTriggered = true;
                 }
                 if (data.bpm !== undefined && data.bpm > aiThresholds.hr.val && !heatstrokeTriggered) {
@@ -1282,6 +1301,7 @@
             const pressEl = document.getElementById('pro-val-press');
             if(pressEl) pressEl.innerHTML = `1013<span class="text-[8px] font-normal text-slate-500 ml-0.5">hPa</span>`; 
 
+            // prevents ui jitter by only printing to the dom terminal on a fraction of the incoming packets
             if (isDeviceWorn && Math.random() > 0.95) {
                 logToTerminal(`[Telemetry] Dual-bus metrics updated gracefully.`, "info");
             }
