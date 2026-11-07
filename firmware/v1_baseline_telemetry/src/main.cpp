@@ -1,451 +1,1316 @@
-#include <Wire.h>
-#include <SPI.h>
-#include <LoRa.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SH110X.h> 
-#include <Adafruit_BME680.h>
-#include "MAX30105.h" 
-
-// BLE Libraries 
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <BLEUtils.h>
-#include <BLE2902.h>
-
-// --- PIN DEFINITIONS ---
-// I2C Bus 0 (Clinical - Fast)
-#define I2C_SDA_0 15 
-#define I2C_SCL_0 16
-
-// I2C Bus 1 (Env & UI - Slow)
-#define I2C_SDA_1 17 
-#define I2C_SCL_1 18
-
-// LoRa SPI
-#define LORA_SCK 12
-#define LORA_MISO 13
-#define LORA_MOSI 11
-#define LORA_CS 10
-#define LORA_RST 9
-#define LORA_DIO0 14
-
-// Analog & Digital IO
-#define GSR_PIN 4
-#define BUZZER_PIN 6
-
-// BLE UUIDs
-#define SERVICE_UUID           "19b10000-e8f2-537e-4f6c-d104768a1214"
-#define CHARACTERISTIC_UUID    "19b10001-e8f2-537e-4f6c-d104768a1214"
-
-BLEServer* pServer = NULL;
-BLECharacteristic* pCharacteristic = NULL;
-volatile bool deviceConnected = false;
-volatile bool oldDeviceConnected = false;
-
-class MyServerCallbacks: public BLEServerCallbacks {
-    void onConnect(BLEServer* pServer) {
-      deviceConnected = true;
-      Serial.println(">>> BLE Client Connected!");
-    };
-    void onDisconnect(BLEServer* pServer) {
-      deviceConnected = false;
-      Serial.println("<<< BLE Client Disconnected!");
-    }
-};
-
-// --- HARDWARE OBJECTS ---
-TwoWire I2C_Clinical = TwoWire(0); 
-Adafruit_SH1106G display(128, 64, &Wire1, -1); 
-Adafruit_BME680 bme(&Wire1);
-MAX30105 max30102; 
-
-// --- FAULT TOLERANCE FLAGS ---
-bool hasOLED = false;
-bool hasBME = false;
-bool hasMAX = false;
-bool hasMPU = false;
-bool hasLoRa = false;
-uint8_t foundMpuAddress = 0x00;
-
-// --- GLOBAL VOLATILE DATA (Shared across tasks) ---
-volatile float sys_bmeTemp = 0.0;
-volatile float sys_bmeHum = 0.0;
-volatile float sys_bmeGas = 0.0;
-volatile uint32_t sys_irValue = 0;
-volatile float sys_accelMag = 0.0;
-volatile int sys_rawGSR = 0;
-volatile float sys_simSkinTemp = 0.0;
-
-// --- NON-BLOCKING ALARM VARIABLES ---
-unsigned long buzzerTimer = 0;
-volatile bool isBuzzing = false;
-
-// --- RAW MPU6050 FUNCTIONS ---
-void wakeMPU6050(uint8_t addr) {
-  I2C_Clinical.beginTransmission(addr);
-  I2C_Clinical.write(0x6B); // Power Management
-  I2C_Clinical.write(0x00); // Wake up
-  if (I2C_Clinical.endTransmission() == 0) {
-    hasMPU = true;
-    Serial.println("SUCCESS (Raw I2C Bypass)");
-  } else {
-    Serial.println("FAILED");
-  }
-}
-
-void readMPU6050_XYZ(uint8_t addr, float &magnitude) {
-  I2C_Clinical.beginTransmission(addr);
-  I2C_Clinical.write(0x3B); 
-  I2C_Clinical.endTransmission(false); 
-  
-  I2C_Clinical.requestFrom((uint16_t)addr, (uint8_t)6);
-  if (I2C_Clinical.available() >= 6) {
-    int16_t x_raw = (I2C_Clinical.read() << 8) | I2C_Clinical.read();
-    int16_t y_raw = (I2C_Clinical.read() << 8) | I2C_Clinical.read();
-    int16_t z_raw = (I2C_Clinical.read() << 8) | I2C_Clinical.read();
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>QYRA Mobile Companion - V1</title>
     
-    // Scale factor for ±2g range: 16384 LSB/g, convert to m/s^2
-    float x = ((float)x_raw / 16384.0) * 9.81; 
-    float y = ((float)y_raw / 16384.0) * 9.81; 
-    float z = ((float)z_raw / 16384.0) * 9.81; 
-    
-    magnitude = sqrt((x*x) + (y*y) + (z*z));
-  }
-}
-
-// TASK 1: CLINICAL & KINEMATICS (Core 1 - Runs at 50Hz)
-void Task_Clinical(void *pvParameters) {
-  for (;;) {
-    if (hasMAX) {
-      max30102.check(); 
-      if (max30102.available()) {
-        sys_irValue = max30102.getIR();
-        max30102.nextSample();
-      }
-    }
-    
-    if (hasMPU) {
-      float tempMag = 0.0;
-      readMPU6050_XYZ(foundMpuAddress, tempMag);
-      sys_accelMag = tempMag;
-      
-      // Fall & Impact Alarm Logic (<3 m/s² freefall, >20 m/s² impact)
-      if (sys_accelMag < 3.0 || sys_accelMag > 20.0) {
-        if (!isBuzzing) {
-          digitalWrite(BUZZER_PIN, HIGH);
-          isBuzzing = true;
-          buzzerTimer = millis();
+    <!-- pulling tailwind from cdn just for the bench prototype so we dont have to compile css yet -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'], mono: ['Fira Code', 'monospace'] },
+                    colors: { 
+                        brand: { 400: '#22d3ee', 500: '#06b6d4' },
+                        darkbg: '#050b14', 
+                        darkcard: '#0b1320', 
+                        darkborder: '#1e293b'
+                    },
+                    animation: {
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'breathe-mint': 'breatheMint 2s infinite',
+                        'fadeUp': 'fadeUp 0.3s ease forwards',
+                        'ping-slow': 'ping 3s cubic-bezier(0, 0, 0.2, 1) infinite'
+                    },
+                    keyframes: {
+                        breatheMint: {
+                            '0%, 100%': { boxShadow: '0 0 0 0 rgba(52, 211, 153, 0.4)' },
+                            '50%': { boxShadow: '0 0 0 15px rgba(52, 211, 153, 0)' },
+                        },
+                        fadeUp: { 
+                            'from': { opacity: '0', transform: 'translateY(10px)' }, 
+                            'to': { opacity: '1', transform: 'translateY(0)' } 
+                        }
+                    }
+                }
+            }
         }
-      }
-    }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Fira+Code:wght@400;600&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
     
-    if (isBuzzing && (millis() - buzzerTimer > 500)) {
-      digitalWrite(BUZZER_PIN, LOW);
-      isBuzzing = false;
-    }
-    
-    sys_rawGSR = analogRead(GSR_PIN);
-    vTaskDelay(20 / portTICK_PERIOD_MS); 
-  }
-}
+    <!-- using chartjs for the live telemetry plotting, will probably switch to fl_chart when we move to flutter -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-// TASK 2: BLE TELEMETRY STREAM (Core 0 - Runs at 10Hz)
-void Task_BLE(void *pvParameters) {
-  char jsonBuffer[250];
-
-  for (;;) {
-    if (deviceConnected) {
-      // 1. Calculate UI values so the Dashboard perfectly matches the OLED
-      bool isWearing = (hasMAX && sys_irValue > 50000);
-      int out_BPM = isWearing ? (72 + (sys_rawGSR % 14)) : 0;
-      int out_SPO2 = isWearing ? (96 + (sys_irValue % 4)) : 0;
-      int out_latency = isWearing ? (14 + (sys_rawGSR % 9)) : 0;
-      int out_battery = 60; // Matches the 60% OLED icon
-
-      // 2. Build the comprehensive JSON string
-      snprintf(jsonBuffer, sizeof(jsonBuffer),
-        "{\"t\":%.1f,\"h\":%.1f,\"g\":%.1f,\"st\":%.1f,\"ir\":%lu,\"bpm\":%d,\"spo2\":%d,\"z\":%.2f,\"gsr\":%d,\"lat\":%d,\"bat\":%d,\"bme\":%d,\"max\":%d,\"mpu\":%d}",
-        sys_bmeTemp, sys_bmeHum, sys_bmeGas, sys_simSkinTemp, 
-        sys_irValue, out_BPM, out_SPO2, sys_accelMag, sys_rawGSR, 
-        out_latency, out_battery,
-        hasBME ? 1 : 0, hasMAX ? 1 : 0, hasMPU ? 1 : 0);
-      
-      pCharacteristic->setValue((uint8_t*)jsonBuffer, strlen(jsonBuffer));
-      pCharacteristic->notify();
-    }
-    
-    if (!deviceConnected && oldDeviceConnected) {
-      pServer->startAdvertising(); 
-      oldDeviceConnected = deviceConnected;
-    }
-    if (deviceConnected && !oldDeviceConnected) {
-      oldDeviceConnected = deviceConnected;
-    }
-    vTaskDelay(100 / portTICK_PERIOD_MS); 
-  }
-}
-
-// TASK 3: ENVIRONMENT & WEARABLE HUD UI (Core 0 - Runs at 2Hz)
-void Task_Env_UI(void *pvParameters) {
-  uint8_t loopCount = 0;
-  bool heartbeatTick = false;
-  
-  for (;;) {
-    loopCount++;
-    heartbeatTick = !heartbeatTick;
-
-    // Environmental Telemetry
-    if (hasBME && (loopCount % 2 == 0)) { 
-      if (bme.performReading()) {
-        sys_bmeTemp = bme.temperature;
-        sys_bmeHum = bme.humidity;
-        sys_bmeGas = bme.gas_resistance / 1000.0; 
-      }
-    }
-
-    // Sensor Fusion (Estimated Body Temp)
-    if (sys_irValue > 50000) {
-      sys_simSkinTemp = (hasBME ? sys_bmeTemp : 36.5) + 1.5 + (random(-2, 3) / 10.0); 
-    } else {
-      sys_simSkinTemp = 0.0; 
-    }
-
-    // --- RENDER WEARABLE HUD ---
-    if (hasOLED) {
-      display.clearDisplay();
-      
-      // EMERGENCY FALL / IMPACT OVERLAY
-      if (isBuzzing) {
-        display.fillRect(0, 0, 128, 64, SH110X_WHITE);
-        display.setTextColor(SH110X_BLACK);
+    <style>
+        body { 
+            font-family: 'Inter', sans-serif; 
+            -webkit-tap-highlight-color: transparent; 
+            overscroll-behavior-y: none;
+            background-color: #f1f5f9; 
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            transition: background-color 0.3s ease;
+        }
         
-        display.setTextSize(1);
-        display.setCursor(14, 8);
-        display.print("! FALL DETECTED !");
-        display.drawFastHLine(10, 20, 108, SH110X_BLACK);
+        .app-container { 
+            width: 100%;
+            max-width: 480px; 
+            height: 100dvh; 
+            background-color: #f8fafc;
+            display: flex; 
+            flex-direction: column; 
+            position: relative; 
+            overflow: hidden; 
+            transition: background-color 0.3s ease;
+        }
+
+        @media (min-width: 640px) {
+            .app-container {
+                height: 90vh;
+                border: 12px solid #1e293b;
+                border-radius: 2.5rem;
+                box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            }
+        }
+
+        html.dark .app-container { background-color: #050b14; }
+
+        ::-webkit-scrollbar { display: none; }
+
+        .pro-card {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 1rem;
+            padding: 1.25rem;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        html.dark .pro-card { background: #0b1320; border-color: #1e293b; box-shadow: none; }
+
+        .user-card {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 1rem;
+            padding: 1rem;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
+        }
+        html.dark .user-card { background: #0b1320; border-color: #1e293b; }
+
+        /* basic tab routing css so we dont have to load react router for a simple prototype */
+        .view-content { display: none; flex: 1; overflow-y: auto; padding-bottom: 90px; }
+        .view-content.active { display: block; animation: fadeUp 0.3s ease forwards; }
+
+        .gauge-circle {
+            transition: stroke-dashoffset 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+            transform: rotate(-90deg);
+            transform-origin: 50% 50%;
+        }
+
+        .nav-btn.active { color: #06b6d4; }
+        html.dark .nav-btn.active { color: #22d3ee; }
+
+        .blink { animation: blinker 1.5s linear infinite; }
+        @keyframes blinker { 50% { opacity: 0.3; } }
+    </style>
+</head>
+<body>
+
+    <div class="app-container text-slate-900 dark:text-slate-50">
         
-        display.setTextSize(2);
-        display.setCursor(20, 26);
-        display.print("IMPACT");
+        <!-- app bar -->
+        <header class="pt-10 sm:pt-6 pb-3 px-5 flex justify-between items-center shrink-0 z-40 bg-white/90 dark:bg-darkbg/90 backdrop-blur-xl border-b border-slate-200 dark:border-darkborder sticky top-0 transition-colors">
+            <div class="flex items-center gap-2">
+                <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 text-white">
+                    <i class="ph-fill ph-waveform text-xl animate-pulse-slow"></i>
+                </div>
+                <div class="leading-tight">
+                    <h1 class="text-sm font-black tracking-tight text-slate-900 dark:text-white">QYRA</h1>
+                    <h2 class="text-[9px] font-bold text-slate-500 uppercase tracking-widest" data-i18n="subtitle">Live Telemetry HUD</h2>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-1.5">
+                <button id="theme-toggle" class="p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                    <i class="ph-fill ph-lightbulb dark:hidden text-lg"></i>
+                    <i class="ph-fill ph-moon hidden dark:block text-lg text-slate-400"></i>
+                </button>
+
+                <div class="relative hidden sm:block">
+                    <button id="lang-btn" class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-darkcard text-slate-700 dark:text-slate-300 text-xs font-semibold">
+                        <i class="ph ph-globe"></i> <span id="current-lang">EN</span>
+                    </button>
+                    <!-- simple dropdown for the multi-language voice alerts -->
+                    <div id="lang-dropdown" class="absolute right-0 mt-2 w-32 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 hidden flex-col overflow-hidden z-50">
+                        <button class="lang-opt px-4 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700 w-full" data-lang="en">English</button>
+                        <button class="lang-opt px-4 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700 w-full" data-lang="hi">हिन्दी</button>
+                        <button class="lang-opt px-4 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700 w-full" data-lang="ta">தமிழ்</button>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-1">
+                    <!-- this only unhides once the tp4056 adc sends a valid battery level -->
+                    <div id="battery-badge" class="hidden items-center gap-0.5 px-1.5 py-1 rounded-md bg-slate-100 dark:bg-slate-800 text-[9px] font-mono font-bold text-slate-600 dark:text-slate-300">
+                        <i class="ph-fill ph-battery-medium text-emerald-500" id="bat-icon"></i><span id="bat-text">--%</span>
+                    </div>
+                    <button id="ble-connect-btn" class="px-2.5 py-1.5 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50 text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95">
+                        <i class="ph-bold ph-bluetooth"></i> <span class="text-[10px]" data-i18n="connectBle">Connect</span>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- home view (simple triage dashboard for the user) -->
+        <main id="view-user" class="view-content active px-5 pt-4 pb-24">
+            
+            <div id="user-alert-container" class="mb-4 flex flex-col gap-2"></div>
+
+            <div class="flex justify-center mb-6 mt-4 relative">
+                <div class="w-56 h-56 rounded-full border-[14px] border-slate-200 dark:border-slate-700/50 flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-800/30 transition-colors" id="user-main-ring">
+                    <h2 class="text-3xl font-black text-slate-400 tracking-tight" id="user-main-status" data-i18n="Standby">Standby</h2>
+                    <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1 text-center leading-tight px-4" id="user-main-sub" data-i18n="Please Wear Device">Waiting for BLE Data</p>
+                </div>
+            </div>
+
+            <button id="btn-sos-user" class="w-full bg-gradient-to-b from-rose-500 to-red-600 hover:from-rose-600 hover:to-red-700 text-white py-4 rounded-2xl font-black text-lg shadow-[0_8px_25px_rgba(225,29,72,0.3)] active:scale-95 transition-all flex items-center justify-center gap-2 mb-6" onclick="triggerLoRaSOS()">
+                <i class="ph-bold ph-warning text-2xl"></i> <span data-i18n="sosBtn">SOS EMERGENCY</span>
+            </button>
+
+            <h3 class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1.5"><i class="ph-fill ph-shield-check text-cyan-500"></i> <span data-i18n="aiPred">Threshold Triage Status</span></h3>
+
+            <div class="grid grid-cols-2 gap-3 mb-4">
+                <div class="user-card flex flex-col">
+                    <span class="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1.5"><i class="ph-fill ph-thermometer-hot text-orange-500"></i> <span data-i18n="cardThermal">Body Temp</span></span>
+                    <span class="text-lg font-black uppercase text-slate-400 mt-1" id="user-pred-st" data-i18n="OFF-WRIST">OFF-WRIST</span>
+                    <div class="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 flex justify-between">
+                        <span class="text-[8px] text-slate-400 font-mono">[PHI SECURED]</span>
+                    </div>
+                </div>
+                
+                <div class="user-card flex flex-col">
+                    <span class="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1.5"><i class="ph-fill ph-heartbeat text-rose-500"></i> <span data-i18n="cardHeart">Heart Rate</span></span>
+                    <span class="text-lg font-black uppercase text-slate-400 mt-1" id="user-pred-hr" data-i18n="OFF-WRIST">OFF-WRIST</span>
+                    <div class="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 flex justify-between">
+                        <span class="text-[8px] text-slate-400 font-mono">[PHI SECURED]</span>
+                    </div>
+                </div>
+
+                <div class="user-card flex flex-col">
+                    <span class="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1.5"><i class="ph-fill ph-person-simple-run text-purple-500"></i> <span data-i18n="cardActivity">Body Activity</span></span>
+                    <span class="text-lg font-black uppercase text-slate-400 mt-1" id="user-pred-z" data-i18n="OFF-WRIST">OFF-WRIST</span>
+                    <div class="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 flex justify-between">
+                        <span class="text-[8px] text-slate-400 font-mono">[PHI SECURED]</span>
+                    </div>
+                </div>
+
+                <div class="user-card flex flex-col">
+                    <span class="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1.5"><i class="ph-fill ph-wind text-teal-500"></i> <span data-i18n="cardAir">Air Quality</span></span>
+                    <span class="text-lg font-black uppercase text-slate-400 mt-1" id="user-pred-gas" data-i18n="STANDBY">STANDBY</span>
+                    <div class="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 flex justify-between">
+                        <span class="text-[8px] text-slate-400 font-mono">[ENV PUBLIC]</span>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- raw sensors view (mostly for debugging the payload from the ESP32) -->
+        <main id="view-pro-sensors" class="view-content px-4 pt-4 pb-24">
+            
+            <div class="flex justify-between items-center mb-3 px-1">
+                <h2 class="text-xs font-bold text-slate-500 uppercase tracking-widest" data-i18n="telemetryDash">Telemetry Dashboard</h2>
+                <span class="text-[9px] bg-slate-200 dark:bg-slate-800 text-slate-500 px-2 py-1 rounded font-mono transition-colors">Threshold Rules Active <i class="ph-fill ph-cpu"></i></span>
+            </div>
+
+            <!-- main 6-panel grid -->
+            <div class="grid grid-cols-2 gap-3 mb-4">
+                
+                <div class="pro-card flex flex-col items-center justify-center p-3">
+                    <button class="absolute top-2 right-2 text-slate-400 hover:text-cyan-500 transition-colors p-1" onclick="openThresholdModal('st')"><i class="ph-bold ph-gear"></i></button>
+                    <div class="relative w-20 h-20 flex items-center justify-center mb-2 mt-1">
+                        <svg class="w-full h-full" viewBox="0 0 100 100">
+                            <circle cx="50" cy="50" r="40" fill="none" class="stroke-slate-200 dark:stroke-slate-800" stroke-width="8"></circle>
+                            <circle id="gauge-st" class="gauge-circle" cx="50" cy="50" r="40" fill="none" stroke="#f97316" stroke-width="8" stroke-dasharray="251.2" stroke-dashoffset="251.2"></circle>
+                        </svg>
+                        <div class="absolute flex flex-col items-center mt-1">
+                            <span class="text-[11px] font-black text-slate-800 dark:text-white leading-none tracking-tight" id="pro-val-st" data-i18n="SECURE">SECURE</span>
+                            <span class="text-[8px] text-slate-400 font-bold" id="unit-st"></span>
+                        </div>
+                    </div>
+                    <div class="w-full text-center">
+                        <h3 class="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1" data-i18n="cardThermal">Body Temp</h3>
+                    </div>
+                </div>
+
+                <div class="pro-card flex flex-col items-center justify-center p-3">
+                    <button class="absolute top-2 right-2 text-slate-400 hover:text-cyan-500 transition-colors p-1" onclick="openThresholdModal('gsr')"><i class="ph-bold ph-gear"></i></button>
+                    <div class="relative w-20 h-20 flex items-center justify-center mb-2 mt-1">
+                        <svg class="w-full h-full" viewBox="0 0 100 100">
+                            <circle cx="50" cy="50" r="40" fill="none" class="stroke-slate-200 dark:stroke-slate-800" stroke-width="8"></circle>
+                            <circle id="gauge-gsr" class="gauge-circle" cx="50" cy="50" r="40" fill="none" stroke="#14b8a6" stroke-width="8" stroke-dasharray="251.2" stroke-dashoffset="251.2"></circle>
+                        </svg>
+                        <div class="absolute flex flex-col items-center mt-1">
+                            <span class="text-[11px] font-black text-slate-800 dark:text-white leading-none tracking-tight" id="pro-val-gsr" data-i18n="SECURE">SECURE</span>
+                            <span class="text-[8px] text-slate-400 font-bold" id="unit-gsr"></span>
+                        </div>
+                    </div>
+                    <div class="w-full text-center">
+                        <h3 class="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1">GSR Tone</h3>
+                    </div>
+                </div>
+
+                <div class="pro-card flex flex-col items-center justify-center p-3">
+                    <button class="absolute top-2 right-2 text-slate-400 hover:text-cyan-500 transition-colors p-1" onclick="openThresholdModal('hr')"><i class="ph-bold ph-gear"></i></button>
+                    <div class="relative w-20 h-20 flex items-center justify-center mb-2 mt-1">
+                        <svg class="w-full h-full" viewBox="0 0 100 100">
+                            <circle cx="50" cy="50" r="40" fill="none" class="stroke-slate-200 dark:stroke-slate-800" stroke-width="8"></circle>
+                            <circle id="gauge-hr" class="gauge-circle" cx="50" cy="50" r="40" fill="none" stroke="#e11d48" stroke-width="8" stroke-dasharray="251.2" stroke-dashoffset="251.2"></circle>
+                        </svg>
+                        <div class="absolute flex flex-col items-center mt-1">
+                            <span class="text-[11px] font-black text-slate-800 dark:text-white leading-none tracking-tight" id="pro-val-hr" data-i18n="SECURE">SECURE</span>
+                            <span class="text-[8px] text-slate-400 font-bold" id="unit-hr"></span>
+                        </div>
+                    </div>
+                    <div class="w-full text-center">
+                        <h3 class="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1" data-i18n="cardHeart">Heart Rate</h3>
+                    </div>
+                </div>
+
+                <div class="pro-card flex flex-col items-center justify-center p-3">
+                    <button class="absolute top-2 right-2 text-slate-400 hover:text-cyan-500 transition-colors p-1" onclick="openThresholdModal('spo2')"><i class="ph-bold ph-gear"></i></button>
+                    <div class="relative w-20 h-20 flex items-center justify-center mb-2 mt-1">
+                        <svg class="w-full h-full" viewBox="0 0 100 100">
+                            <circle cx="50" cy="50" r="40" fill="none" class="stroke-slate-200 dark:stroke-slate-800" stroke-width="8"></circle>
+                            <circle id="gauge-spo2" class="gauge-circle" cx="50" cy="50" r="40" fill="none" stroke="#0284c7" stroke-width="8" stroke-dasharray="251.2" stroke-dashoffset="251.2"></circle>
+                        </svg>
+                        <div class="absolute flex flex-col items-center mt-1">
+                            <span class="text-[11px] font-black text-slate-800 dark:text-white leading-none tracking-tight" id="pro-val-spo2" data-i18n="SECURE">SECURE</span>
+                            <span class="text-[8px] text-slate-400 font-bold" id="unit-spo2"></span>
+                        </div>
+                    </div>
+                    <div class="w-full text-center">
+                        <h3 class="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1">Blood Oxygen</h3>
+                    </div>
+                </div>
+
+                <div class="pro-card flex flex-col items-center justify-center p-3">
+                    <button class="absolute top-2 right-2 text-slate-400 hover:text-cyan-500 transition-colors p-1" onclick="openThresholdModal('z')"><i class="ph-bold ph-gear"></i></button>
+                    <div class="relative w-20 h-20 flex items-center justify-center mb-2 mt-1">
+                        <svg class="w-full h-full" viewBox="0 0 100 100">
+                            <circle cx="50" cy="50" r="40" fill="none" class="stroke-slate-200 dark:stroke-slate-800" stroke-width="8"></circle>
+                            <circle id="gauge-z" class="gauge-circle" cx="50" cy="50" r="40" fill="none" stroke="#a855f7" stroke-width="8" stroke-dasharray="251.2" stroke-dashoffset="251.2"></circle>
+                        </svg>
+                        <div class="absolute flex flex-col items-center mt-1">
+                            <span class="text-xl font-black text-slate-800 dark:text-white leading-none" id="pro-val-z">--</span>
+                            <span class="text-[9px] text-slate-400 font-bold">m/s²</span>
+                        </div>
+                    </div>
+                    <div class="w-full text-center">
+                        <h3 class="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1">Kinematics</h3>
+                    </div>
+                </div>
+
+                <!-- environment data gets a text grid since there are too many variables for one gauge -->
+                <div class="pro-card flex flex-col justify-between p-3">
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">Environment</h3>
+                        <button class="text-slate-400 hover:text-cyan-500 transition-colors p-1" onclick="openThresholdModal('env')"><i class="ph-bold ph-gear"></i></button>
+                    </div>
+                    <div class="grid grid-cols-2 gap-y-2 gap-x-1 mt-auto">
+                        <div>
+                            <span class="text-[8px] text-slate-400 block uppercase font-bold">VOC Gas</span>
+                            <span class="text-xs font-black text-slate-800 dark:text-white" id="pro-val-gas">--</span>
+                        </div>
+                        <div>
+                            <span class="text-[8px] text-slate-400 block uppercase font-bold">Ambient</span>
+                            <span class="text-xs font-black text-slate-800 dark:text-white" id="pro-val-temp">--</span>
+                        </div>
+                        <div>
+                            <span class="text-[8px] text-slate-400 block uppercase font-bold">Humidity</span>
+                            <span class="text-xs font-black text-slate-800 dark:text-white" id="pro-val-hum">--</span>
+                        </div>
+                        <div>
+                            <span class="text-[8px] text-slate-400 block uppercase font-bold">Pressure</span>
+                            <span class="text-xs font-black text-slate-800 dark:text-white" id="pro-val-press">--</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="pro-card mb-4">
+                <div class="flex justify-between items-start mb-3">
+                    <div>
+                        <h3 class="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-widest flex items-center gap-1.5"><i class="ph-bold ph-chart-line-up text-cyan-500"></i> <span data-i18n="liveStream">Live Telemetry Stream</span></h3>
+                    </div>
+                    <select id="chartSelector" class="bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs rounded focus:ring-cyan-500 block p-1 outline-none font-semibold cursor-pointer">
+                        <option value="hr">Heart Rate (BPM)</option>
+                        <option value="st">Body Temp (°C)</option>
+                        <option value="gsr">GSR Tone (raw)</option>
+                        <option value="z">Kinematics Z</option>
+                    </select>
+                </div>
+                
+                <div class="w-full h-32 relative mt-2">
+                    <canvas id="multiChart"></canvas>
+                </div>
+            </div>
+
+            <!-- console output to make sure the rtos tasks aren't choking -->
+            <div class="pro-card bg-slate-900 text-cyan-400 font-mono text-[10px] p-3 rounded-xl border border-slate-800 mb-4 shadow-inner">
+                <div class="flex justify-between items-center mb-2 border-b border-slate-800 pb-1.5">
+                    <span class="font-bold uppercase tracking-widest text-slate-300 flex items-center gap-1"><i class="ph-fill ph-terminal text-cyan-400"></i> Firmware Telemetry Log</span>
+                    <span id="conf-env" class="text-[9px] text-slate-500">Mode: Deterministic RTOS</span>
+                </div>
+                <div id="ai-terminal-logs" class="space-y-1 h-20 overflow-y-auto pr-1 text-[9px] text-slate-300">
+                    <div>[System] Waiting for BLE GATT connection...</div>
+                </div>
+            </div>
+
+            <!-- this grid maps to the boolean fault flags in our c++ code so we know if a sensor came loose on the breadboard -->
+            <div class="pro-card p-3">
+                <h3 class="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-widest flex items-center gap-1.5 mb-3"><i class="ph-fill ph-cpu text-cyan-500"></i> Hardware Diagnostics</h3>
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-2 rounded-lg flex items-center gap-2">
+                        <div id="diag-bme-dot" class="w-2 h-2 rounded-full bg-slate-400"></div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-700 dark:text-slate-300 block leading-tight">BME680</span>
+                            <span class="text-[8px] text-slate-400">I2C 0x77</span>
+                        </div>
+                    </div>
+                    <div class="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-2 rounded-lg flex items-center gap-2">
+                        <div id="diag-max-dot" class="w-2 h-2 rounded-full bg-slate-400"></div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-700 dark:text-slate-300 block leading-tight">MAX30102</span>
+                            <span class="text-[8px] text-slate-400">I2C 0x57</span>
+                        </div>
+                    </div>
+                    <div class="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-2 rounded-lg flex items-center gap-2">
+                        <div id="diag-mpu-dot" class="w-2 h-2 rounded-full bg-slate-400"></div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-700 dark:text-slate-300 block leading-tight">MPU6050</span>
+                            <span class="text-[8px] text-slate-400">I2C 0x68</span>
+                        </div>
+                    </div>
+                    <div class="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-2 rounded-lg flex items-center gap-2">
+                        <div id="diag-mlx-dot" class="w-2 h-2 rounded-full bg-slate-400"></div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-700 dark:text-slate-300 block leading-tight">MLX90614</span>
+                            <span class="text-[8px] text-slate-400">I2C 0x5A</span>
+                        </div>
+                    </div>
+                    <div class="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-2 rounded-lg flex items-center gap-2">
+                        <div id="diag-lora-dot" class="w-2 h-2 rounded-full bg-emerald-500"></div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-700 dark:text-slate-300 block leading-tight">LoRa RF</span>
+                            <span class="text-[8px] text-slate-400">SPI 865MHz</span>
+                        </div>
+                    </div>
+                    <!-- tracking the tp4056 output on pin 7 -->
+                    <div class="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-2 rounded-lg flex items-center gap-2">
+                        <div id="diag-adc-dot" class="w-2 h-2 rounded-full bg-emerald-500"></div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-700 dark:text-slate-300 block leading-tight">TP4056 Bat</span>
+                            <span class="text-[8px] text-slate-400">ADC Pin 7</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Disaster Hub (LoRa operations) -->
+        <main id="view-pro-disaster" class="view-content px-4 pt-4 pb-24">
+            <div class="flex justify-between items-center mb-4 px-1">
+                <div class="flex items-center gap-2">
+                    <i class="ph-fill ph-lifebuoy text-cyan-500 text-xl"></i>
+                    <h2 class="text-sm font-black text-slate-800 dark:text-white uppercase tracking-widest">Disaster Hub & Mesh</h2>
+                </div>
+                <span class="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/30 px-2 py-1 rounded border border-emerald-200 dark:border-emerald-800/50">865 MHz P2P</span>
+            </div>
+
+            <!-- pulling real gps from the browser so the lora packet actually has valid coordinates to broadcast -->
+            <div class="pro-card mb-3 bg-slate-50 dark:bg-slate-800/50 p-3">
+                 <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1"><i class="ph-fill ph-crosshair"></i> My Rescue Node</h3>
+                    <span class="text-[9px] font-mono text-cyan-500 blink">TX/RX STANDBY</span>
+                </div>
+                <div class="mb-4">
+                    <span class="text-[8px] text-slate-400 block uppercase font-bold mb-0.5">Live Location (GPS Sync)</span>
+                    <span class="text-xs font-mono font-black text-slate-800 dark:text-white block leading-tight" id="my-gps-cords">Acquiring Location...<br><span class="text-[9px] text-slate-500 font-normal">Waiting for browser permission</span></span>
+                </div>
+                <button onclick="triggerLoRaSOS()" id="lora-sos-btn" class="w-full bg-slate-800 dark:bg-slate-700 hover:bg-slate-700 dark:hover:bg-slate-600 text-white py-3 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 active:scale-95 shadow-md disabled:opacity-50" disabled>
+                    <i class="ph-bold ph-broadcast text-rose-500 text-lg"></i> Connect BLE to Broadcast SOS
+                </button>
+            </div>
+            
+            <p class="text-[9px] text-slate-500 dark:text-slate-400 text-center px-4">Incoming peer-to-peer LoRa distress signals will automatically render here during emergency events.</p>
+        </main>
+
+        <!-- Settings tab -->
+        <main id="view-settings" class="view-content px-4 pt-4 pb-24">
+            <h2 class="text-sm font-black text-slate-800 dark:text-white uppercase tracking-widest mb-4 px-1" data-i18n="systemSettings">System Settings</h2>
+            
+            <div class="space-y-3">
+                
+                <div class="pro-card p-4">
+                    <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3" data-i18n="devConn">Device & Connection</h3>
+                    <div class="flex justify-between items-center py-2 border-b border-slate-100 dark:border-slate-800">
+                        <span class="text-sm font-semibold text-slate-700 dark:text-slate-300">BLE Device Name</span>
+                        <span class="text-xs font-mono text-slate-400">SIH_OMNI_STACK</span>
+                    </div>
+                    <div class="flex justify-between items-center py-2 border-b border-slate-100 dark:border-slate-800">
+                        <span class="text-sm font-semibold text-slate-700 dark:text-slate-300">BLE Polling Rate</span>
+                        <span class="text-xs font-mono text-slate-400">10 Hz</span>
+                    </div>
+                    <div class="flex justify-between items-center py-2 border-b border-slate-100 dark:border-slate-800">
+                        <span class="text-sm font-semibold text-slate-700 dark:text-slate-300">Battery Level</span>
+                        <span class="text-xs font-mono text-emerald-500 font-bold" id="settings-bat">--%</span>
+                    </div>
+                    <div class="flex justify-between items-center py-2 mb-4">
+                        <span class="text-sm font-semibold text-slate-700 dark:text-slate-300">Firmware Logic</span>
+                        <span class="text-xs font-mono text-cyan-500">v1.0 (Thresholds)</span>
+                    </div>
+
+                    <button id="btn-ota-sync" class="w-full bg-slate-800 dark:bg-slate-700 hover:bg-slate-700 dark:hover:bg-slate-600 text-white py-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 active:scale-95 shadow-md">
+                        <i class="ph-bold ph-arrows-clockwise" id="ota-btn-icon"></i> <span id="ota-btn-text">Update Threshold Rules (OTA)</span>
+                    </button>
+                </div>
+
+                <div class="pro-card p-4">
+                    <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3" data-i18n="privData">Privacy & Data Storage</h3>
+                    
+                    <div class="flex justify-between items-center py-2 border-b border-slate-100 dark:border-slate-800">
+                        <span class="text-sm font-semibold text-slate-700 dark:text-slate-300">Local Data Logging</span>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="toggle-local-storage" class="sr-only peer" checked>
+                            <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-slate-600 peer-checked:bg-emerald-500"></div>
+                        </label>
+                    </div>
+                    <p class="text-[9px] text-slate-400 mt-2 leading-tight">Data is strictly saved to this device's local browser memory to comply with DPDP. No cloud sync is active.</p>
+                </div>
+
+                <!-- csv exporter built for offline analysis without any backend dependencies -->
+                <div class="pro-card p-4">
+                    <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3">Export Telemetry</h3>
+                    <p class="text-[9px] text-slate-400 mb-4 leading-tight">Download locally saved sensor telemetry in CSV format for offline analysis.</p>
+                    
+                    <div class="flex gap-2">
+                        <button onclick="downloadData('24h')" class="flex-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 py-2.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 active:scale-95 border border-slate-200 dark:border-slate-700">
+                            <i class="ph-bold ph-download-simple text-lg"></i> Last 24 Hrs
+                        </button>
+                        <button onclick="downloadData('all')" class="flex-1 bg-cyan-500 hover:bg-cyan-600 text-white py-2.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 active:scale-95 shadow-md shadow-cyan-500/20">
+                            <i class="ph-bold ph-database text-lg"></i> Full Export
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+
+        <!-- threshold config modal (pops up when clicking the gear icon on the sensor cards) -->
+        <div id="thresholdModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-end sm:items-center justify-center p-0 sm:p-4">
+            <div class="bg-white dark:bg-darkcard w-full max-w-sm rounded-t-3xl sm:rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-2xl animate-fadeUp">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 id="modalTitle" class="text-sm font-black uppercase text-slate-800 dark:text-white tracking-wide">Sensor Settings</h3>
+                    <button onclick="closeThresholdModal()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><i class="ph-bold ph-x text-lg"></i></button>
+                </div>
+                
+                <div class="space-y-4">
+                    <div>
+                        <div class="flex justify-between text-xs font-bold mb-1">
+                            <span class="text-slate-500">Alert Threshold Limit</span>
+                            <span id="modalValDisplay" class="text-cyan-500 font-mono font-black">0</span>
+                        </div>
+                        <input type="range" id="modalSlider" class="w-full accent-cyan-500 cursor-pointer">
+                        <p class="text-[9px] text-slate-400 mt-1" id="modalThresholdDesc">Adjust the value to trigger voice alerts earlier or later.</p>
+                    </div>
+
+                    <div id="phiUnlockContainer" class="hidden pt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                        <div>
+                            <span class="text-xs font-bold text-slate-700 dark:text-slate-200 block">Unlock Raw Health Data (PHI)</span>
+                            <span class="text-[9px] text-slate-400">Override Triage Insight & display precise numbers.</span>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="modalPhiToggle" class="sr-only peer">
+                            <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-slate-600 peer-checked:bg-rose-500"></div>
+                        </label>
+                    </div>
+                </div>
+
+                <button onclick="saveThresholdModal()" class="w-full mt-6 bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2.5 rounded-xl text-xs transition-all shadow-lg shadow-cyan-500/20">Apply Configuration</button>
+            </div>
+        </div>
+
+        <!-- sticky bottom nav -->
+        <nav id="bottom-nav" class="absolute bottom-0 w-full bg-white/90 dark:bg-darkbg/95 backdrop-blur-xl border-t border-slate-200 dark:border-darkborder flex justify-around items-center pt-3 pb-8 z-40 shrink-0 transition-colors">
+            <button class="nav-btn flex flex-col items-center gap-1 w-16 text-slate-400 hover:text-cyan-500 transition-colors active" data-target="view-user" id="nav-btn-home">
+                <i class="ph-fill ph-house text-2xl"></i>
+                <span class="text-[9px] font-bold tracking-wide" data-i18n="navHome">Home</span>
+            </button>
+            <button class="nav-btn flex flex-col items-center gap-1 w-16 text-slate-400 hover:text-cyan-500 transition-colors" data-target="view-pro-sensors" id="nav-btn-sensors">
+                <i class="ph ph-wave-sawtooth text-2xl"></i>
+                <span class="text-[9px] font-bold tracking-wide" data-i18n="navSensors">Sensors</span>
+            </button>
+            <button class="nav-btn flex flex-col items-center gap-1 w-16 text-slate-400 hover:text-cyan-500 transition-colors" data-target="view-pro-disaster" id="nav-btn-disaster">
+                <i class="ph ph-lifebuoy text-2xl"></i>
+                <span class="text-[9px] font-bold tracking-wide" data-i18n="navRescue">SOS</span>
+            </button>
+            <button class="nav-btn flex flex-col items-center gap-1 w-16 text-slate-400 hover:text-cyan-500 transition-colors" data-target="view-settings" id="nav-btn-settings">
+                <i class="ph ph-gear text-2xl"></i>
+                <span class="text-[9px] font-bold tracking-wide" data-i18n="navSettings">Settings</span>
+            </button>
+        </nav>
+    </div>
+
+    <script>
+        // core state flags
+        let isDeviceWorn = false;
+        let currentLang = 'en';
         
-        display.setTextSize(1);
-        display.setCursor(10, 48);
-        display.print("3D G: ");
-        display.print(sys_accelMag, 1);
-        display.print(" m/s2");
+        // privacy toggle state. if true, it masks the raw value on the UI behind a "SECURE" badge.
+        let phiMasks = { st: true, gsr: true, hr: true, spo2: true }; 
         
-        display.display();
-        vTaskDelay(250 / portTICK_PERIOD_MS);
-        continue;
-      }
-
-      // TOP HEADER ROW (Y: 0 to 7)
-      display.setTextColor(SH110X_WHITE);
-      display.setTextSize(1);
-      display.setCursor(0, 0);
-      display.print("QYRA"); 
-
-      // Bluetooth Icon (Geometric)
-      if (deviceConnected) {
-        display.drawLine(78, 1, 78, 7, SH110X_WHITE); // Center spine
-        display.drawLine(78, 1, 81, 3, SH110X_WHITE); // Top right
-        display.drawLine(81, 3, 75, 6, SH110X_WHITE); // Cross bottom-left
-        display.drawLine(75, 2, 81, 5, SH110X_WHITE); // Cross bottom-right
-        display.drawLine(81, 5, 78, 7, SH110X_WHITE); // Bottom right
-      }
-
-      // Battery Icon (60% Fill)
-      display.drawRect(102, 0, 18, 7, SH110X_WHITE);     // Outline
-      display.fillRect(104, 2, 10, 3, SH110X_WHITE);     // 10px fill = 60%
-      display.drawFastVLine(120, 2, 3, SH110X_WHITE);    // Positive Tip
-
-      // Header Divider Line (Y: 8)
-      display.drawFastHLine(0, 8, 128, SH110X_WHITE);   
-
-      // Wear Detection Logic
-      bool isWearing = (hasMAX && sys_irValue > 50000);
-
-      if (!isWearing) {
-        // --- DETACHED STATE ---
-        display.setTextSize(2);
-        display.setCursor(16, 22);
-        display.print("DETACHED");
+        // had to wrap local storage in a try-catch because running this file from a strict iframe blocks access and crashes the script
+        let localDataLog = [];
+        try {
+            localDataLog = JSON.parse(localStorage.getItem('qyra_telemetry')) || [];
+        } catch(e) {
+            console.warn("local storage is disabled by your browser settings.");
+        }
         
-        display.setTextSize(1);
-        display.setCursor(22, 42);
-        display.print("PLEASE WEAR IT");
-      } else {
-        // 4-QUADRANT GRID LAYOUT
-        // Draw Central Crosshairs
-        display.drawFastVLine(64, 8, 47, SH110X_WHITE);  // Vertical Spine
-        display.drawFastHLine(0, 36, 128, SH110X_WHITE); // Horizontal Midline
+        const localStoreToggle = document.getElementById('toggle-local-storage');
+        let isLoggingEnabled = localStoreToggle ? localStoreToggle.checked : true;
+        let lastLogTime = 0;
+
+        if (localStoreToggle) {
+            localStoreToggle.addEventListener('change', (e) => {
+                isLoggingEnabled = e.target.checked;
+                if(isLoggingEnabled) {
+                    logToTerminal("[System] Local data logging ENABLED.", "good");
+                } else {
+                    logToTerminal("[System] Local data logging DISABLED.", "alert");
+                }
+            });
+        }
+
+        // lightweight csv exporter. loops over the localDataLog array and dumps it to a blob.
+        window.downloadData = function(timeframe) {
+            let dataToExport = localDataLog;
+            
+            if (timeframe === '24h') {
+                const cutoff = Date.now() - (24 * 60 * 60 * 1000);
+                dataToExport = localDataLog.filter(d => new Date(d.timestamp).getTime() > cutoff);
+            }
+            
+            if (dataToExport.length === 0) {
+                logToTerminal("[Export] No data available to download.", "alert");
+                return;
+            }
+
+            let csv = "Timestamp,BodyTemp(C),HeartRate(BPM),SpO2(%),GSR(raw),Kinematics(G),VOC(kOhm)\n";
+            dataToExport.forEach(row => {
+                csv += `${row.timestamp},${row.temp},${row.hr},${row.spo2},${row.gsr},${row.kinematics},${row.voc}\n`;
+            });
+
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.setAttribute('hidden', '');
+            a.setAttribute('href', url);
+            a.setAttribute('download', `QYRA_Telemetry_${timeframe}_${Date.now()}.csv`);
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            
+            logToTerminal(`[Export] Successfully downloaded ${dataToExport.length} telemetry records.`, "good");
+        };
         
-        int ui_BPM = 72 + (sys_rawGSR % 14); 
-        int ui_SPO2 = 96 + (sys_irValue % 4); 
+        // these thresholds align directly with the logic running in the esp32 firmware
+        let aiThresholds = {
+            st: { val: 37.5, min: 25.0, max: 42.0, step: 0.1, desc: "Triggers Body Temp / Wellness alerts above this value." },
+            gsr: { val: 1500, min: 100, max: 4000, step: 50, desc: "Triggers Sweaty/Profuse alerts above this skin conductance." },
+            hr: { val: 100, min: 40, max: 200, step: 1, desc: "Triggers Cardiac/Rest alerts above this BPM." },
+            spo2: { val: 92, min: 60, max: 100, step: 1, desc: "Triggers Oxygen alerts if blood oxygen drops below this %." },
+            z: { val: 15.0, min: 1.0, max: 30.0, step: 0.5, desc: "Triggers Fall/Impact alerts above this kinematic G-force." },
+            env: { val: 30, min: 5, max: 200, step: 5, desc: "Triggers Air Quality alerts if resistance drops below this." }
+        };
+        let activeModalKey = null;
 
-        // -- TOP LEFT QUADRANT: Heart Rate (Y: 9 to 35) --
-        display.setTextSize(1); 
-        display.setCursor(14, 11);
-        if (heartbeatTick) display.print((char)3); else display.print(" ");
-        display.print(" HR");
-
-        display.setTextSize(2); 
-        display.setCursor(20, 20); 
-        display.print(ui_BPM);
-
-        // -- TOP RIGHT QUADRANT: SpO2 (Y: 9 to 35) --
-        display.setTextSize(1);
-        display.setCursor(76, 11);
-        display.print("SpO2 %");
-
-        display.setTextSize(2);
-        display.setCursor(82, 20); 
-        display.print(ui_SPO2);
-
-        // -- BOTTOM LEFT QUADRANT: Temp & Act (Y: 37 to 54) --
-        display.setTextSize(1); 
+        const htmlEl = document.documentElement;
+        const themeToggleBtn = document.getElementById('theme-toggle');
+        const langDropdown = document.getElementById('lang-dropdown');
         
-        // Body Temp
-        display.setCursor(2, 39);
-        display.print("TMP:"); 
-        display.print(sys_simSkinTemp, 1);
+        let multiChart = null;
+
+        themeToggleBtn.onclick = () => {
+            htmlEl.classList.toggle('dark');
+            if(multiChart) updateChartTheme();
+        };
+
+        const langBtn = document.getElementById('lang-btn');
+        langBtn.onclick = (e) => { 
+            e.stopPropagation(); 
+            langDropdown.classList.toggle('hidden'); 
+        };
+        document.addEventListener('click', () => langDropdown.classList.add('hidden'));
         
-        // Motion Activity
-        display.setCursor(2, 47);
-        display.print("ACT:");
-        if (!hasMPU) display.print("ERR");
-        else if (sys_accelMag < 5.0) display.print("FALL");
-        else if (sys_accelMag > 15.0) display.print("SHOCK");
-        else if (sys_accelMag > 11.5 || sys_accelMag < 8.0) display.print("MOVE");
-        else display.print("STABLE");
+        document.querySelectorAll('.lang-opt').forEach(opt => {
+            opt.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation(); // forces the ui text update to run before the dropdown hides
+                
+                currentLang = opt.getAttribute('data-lang');
+                const curLangEl = document.getElementById('current-lang');
+                if(curLangEl) curLangEl.innerText = currentLang.toUpperCase();
+                
+                langDropdown.classList.add('hidden'); 
+                updateLanguageUI();
+                
+                // if ble hasn't streamed data yet, we force a re-render to update the standby labels
+                if (!isDeviceWorn) {
+                    processIncomingData({});
+                }
+            });
+        });
 
-        // -- BOTTOM RIGHT QUADRANT: AQI & GSR (Y: 37 to 54) --
-        // Air Quality
-        display.setCursor(68, 39);
-        display.print("AQI:");
-        if (!hasBME) display.print("ERR");
-        else if (sys_bmeGas > 50.0) display.print("GOOD");
-        else if (sys_bmeGas > 20.0) display.print("FAIR");
-        else if (sys_bmeGas > 10.0) display.print("POOR");
-        else display.print("BAD");
+        // simple tab routing logic
+        const navBtns = document.querySelectorAll('.nav-btn');
+        const viewContents = document.querySelectorAll('.view-content');
 
-        // GSR / Sweat
-        display.setCursor(68, 47);
-        display.print("GSR:");
-        if (sys_rawGSR < 1200) display.print("DRY");
-        else if (sys_rawGSR < 2800) display.print("NORM");
-        else display.print("SWEAT");
-      }
-      // BOTTOM LATENCY FOOTER (Y: 55 to 63)
-      // Footer Divider (Y: 55)
-      display.drawFastHLine(0, 55, 128, SH110X_WHITE);
-      
-      display.setTextSize(1);
-      display.setCursor(0, 57);
-      display.print("EDGE AI LATENCY: ");
-      
-      if (!isWearing) {
-        display.print("IDLE");
-      } else {
-        int simulatedLatency = 14 + (sys_rawGSR % 9); 
-        display.print(simulatedLatency);
-        display.print("ms");
-      }
+        function switchTab(clickedBtn, targetViewId) {
+            navBtns.forEach(b => {
+                b.classList.remove('active');
+                let i = b.querySelector('i');
+                if(i) i.classList.replace('ph-fill', 'ph');
+            });
+            viewContents.forEach(v => v.classList.remove('active'));
 
-      display.display();
-    }
-    
-    vTaskDelay(500 / portTICK_PERIOD_MS); 
-  }
-}
+            clickedBtn.classList.add('active');
+            let clickedI = clickedBtn.querySelector('i');
+            if(clickedI) clickedI.classList.replace('ph', 'ph-fill');
+            
+            document.getElementById(targetViewId).classList.add('active');
+        }
 
-// MAIN SETUP
-void setup() {
-  Serial.begin(115200);
-  delay(2000);
-  
-  Serial.println("\n========================================");
-  Serial.println("SIH ID26181: OMNI-STACK RTOS (TRI-TASK)");
-  Serial.println("========================================\n");
+        navBtns.forEach(btn => {
+            btn.onclick = () => switchTab(btn, btn.dataset.target);
+        });
 
-  pinMode(BUZZER_PIN, OUTPUT);
-  pinMode(GSR_PIN, INPUT);
-  analogReadResolution(12);
-  
-  digitalWrite(BUZZER_PIN, HIGH); delay(100); digitalWrite(BUZZER_PIN, LOW);
+        // translation maps for the ui elements
+        const UI_I18N = {
+            en: { 
+                optimal: "Optimal", allNormal: "All Systems Normal", sosBtn: "SOS EMERGENCY", aiPred: "Threshold Triage Status", 
+                navHome: "Home", navSensors: "Sensors", navRescue: "SOS", navSettings: "Settings", 
+                cardThermal: "Body Temp", cardHeart: "Heart Rate", cardActivity: "Body Activity", cardAir: "Air Quality",
+                subtitle: "Live Telemetry HUD", telemetryDash: "Telemetry Dashboard", liveStream: "Live Telemetry Stream",
+                systemSettings: "System Settings",
+                "OFF-WRIST": "OFF-WRIST", "STABLE": "STABLE", "ELEVATED": "ELEVATED", 
+                "RESTING": "RESTING", "HYPOXIA": "HYPOXIA", "LOW": "LOW", 
+                "IMPACT": "IMPACT", "NOMINAL": "NOMINAL", 
+                "POOR AIR": "POOR AIR", "CLEAN AIR": "CLEAN AIR", "WARMING UP": "WARMING UP",
+                "DRY": "DRY", "NORMAL": "NORMAL", "SWEATY": "SWEATY", "PROFUSE": "PROFUSE",
+                "Standby": "Standby", "Please Wear Device": "Waiting for BLE Data", "SECURE": "SECURE",
+                "STANDBY": "STANDBY",
+                connectBle: "Connect", devConn: "Device & Connection", privData: "Privacy & Data Storage"
+            },
+            hi: { 
+                optimal: "सर्वोत्तम", allNormal: "सभी प्रणालियाँ सामान्य", sosBtn: "आपातकाल (SOS)", aiPred: "ट्रायज स्थिति", 
+                navHome: "होम", navSensors: "सेंसर", navRescue: "एसओएस", navSettings: "सेटिंग्स", 
+                cardThermal: "शरीर का तापमान", cardHeart: "हृदय गति", cardActivity: "शारीरिक गतिविधि", cardAir: "वायु गुणवत्ता",
+                subtitle: "लाइव टेलीमेट्री", telemetryDash: "टेलीमेट्री डैशबोर्ड", liveStream: "लाइव टेलीमेट्री स्ट्रीम",
+                systemSettings: "सिस्टम सेटिंग्स",
+                "OFF-WRIST": "पहना नहीं है", "STABLE": "स्थिर", "ELEVATED": "बढ़ा हुआ", 
+                "RESTING": "सामान्य", "HYPOXIA": "ऑक्सीजन की कमी", "LOW": "कम", 
+                "IMPACT": "प्रभाव (गिरना)", "NOMINAL": "सामान्य", 
+                "POOR AIR": "खराब हवा", "CLEAN AIR": "स्वच्छ हवा", "WARMING UP": "वार्मिंग अप",
+                "DRY": "सूखा", "NORMAL": "सामान्य", "SWEATY": "पसीना", "PROFUSE": "अत्यधिक पसीना",
+                "Standby": "स्टैंडबाय", "Please Wear Device": "BLE डेटा की प्रतीक्षा", "SECURE": "सुरक्षित",
+                "STANDBY": "स्टैंडबाय",
+                connectBle: "कनेक्ट करें", devConn: "डिवाइस और कनेक्शन", privData: "गोपनीयता और डेटा"
+            },
+            ta: { 
+                optimal: "உகந்தது", allNormal: "அனைத்தும் இயல்பானவை", sosBtn: "அவசரம் (SOS)", aiPred: "ட்ரேஜ் நிலை", 
+                navHome: "முகப்பு", navSensors: "சென்சார்கள்", navRescue: "SOS", navSettings: "அமைப்புகள்", 
+                cardThermal: "உடல் வெப்பநிலை", cardHeart: "இதய துடிப்பு", cardActivity: "உடல் செயல்பாடு", cardAir: "காற்றின் தரம்",
+                subtitle: "லைவ் டெலிமெட்ரி", telemetryDash: "டெலிமெட்ரி டேஷ்போர்டு", liveStream: "நேரடி டெலிமெட்ரி ஸ்ட்ரீம்",
+                systemSettings: "கணினி அமைப்புகள்",
+                "OFF-WRIST": "அணியவில்லை", "STABLE": "நிலையானது", "ELEVATED": "உயர்ந்தது", 
+                "RESTING": "ஓய்வில்", "HYPOXIA": "ஆக்சிஜன் குறைபாடு", "LOW": "குறைவு", 
+                "IMPACT": "வீழ்ச்சி", "NOMINAL": "இயல்பானது", 
+                "POOR AIR": "மோசமான காற்று", "CLEAN AIR": "சுத்தமான காற்று", "WARMING UP": "தயாராகிறது",
+                "DRY": "உலர்", "NORMAL": "இயல்பானது", "SWEATY": "வியர்வை", "PROFUSE": "அதிக வியர்வை",
+                "Standby": "காத்திருப்பு", "Please Wear Device": "BLE தரவுக்காக காத்திருக்கிறது", "SECURE": "பாதுகாப்பானது",
+                "STANDBY": "காத்திருப்பு",
+                connectBle: "இணைக்க", devConn: "சாதனம் மற்றும் இணைப்பு", privData: "தனியுரிமை மற்றும் தரவு"
+            }
+        };
 
-  I2C_Clinical.begin(I2C_SDA_0, I2C_SCL_0, 100000);
-  Wire1.begin(I2C_SDA_1, I2C_SCL_1, 100000); 
+        function t(key) {
+            if(UI_I18N[currentLang] && UI_I18N[currentLang][key]) return UI_I18N[currentLang][key];
+            if(UI_I18N['en'][key]) return UI_I18N['en'][key];
+            return key;
+        }
 
-  Serial.print("Booting OLED Display... ");
-  if (display.begin(0x3C, true)) { 
-    Serial.println("SUCCESS");
-    hasOLED = true;
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(SH110X_WHITE);
-    display.setCursor(0, 10);
-    display.println("RTOS Booting...");
-    display.display();
-  } else { Serial.println("FAILED"); }
+        const VOICE_ALERTS = {
+            en: {
+                fall: "Fall detected. Please do not panic, a message has been sent to your emergency contacts.",
+                heatstroke: "Severe heat strain detected. Please rest in the shade and sip water slowly.",
+                ventilation: "High ambient heat and humidity. Please move to a ventilated area to cool down.",
+                respiratory: "Poor air quality detected. Please reduce physical exertion.",
+                cardiac: "Elevated heart rate detected. Please stop your current activity and rest immediately.",
+                fever: "Elevated body temperature detected. Please rest and stay hydrated.",
+                hypoxia: "Low oxygen levels detected. Please sit down and take deep breaths."
+            }
+        };
 
-  Serial.print("Booting BME680... ");
-  if (bme.begin(0x77) || bme.begin(0x76)) {
-    Serial.println("SUCCESS");
-    hasBME = true;
-    bme.setTemperatureOversampling(BME680_OS_8X);
-    bme.setHumidityOversampling(BME680_OS_2X);
-    bme.setPressureOversampling(BME680_OS_4X);
-    bme.setIIRFilterSize(BME680_FILTER_SIZE_3);
-    bme.setGasHeater(320, 150); 
-  } else { Serial.println("FAILED"); }
+        const TTS_LANG_MAP = { en: 'en-US', hi: 'hi-IN', ta: 'ta-IN' };
+        
+        // added a 30s debounce to ensure the text-to-speech doesn't trigger wildly 
+        // if a sensor reading jitters back and forth over a threshold limit.
+        let lastAlertTimes = { fall: 0, heatstroke: 0, ventilation: 0, respiratory: 0, cardiac: 0, fever: 0, hypoxia: 0, lora_rx: 0 };
 
-  Serial.print("Booting MAX30102... ");
-  if (max30102.begin(I2C_Clinical, I2C_SPEED_STANDARD)) {
-    Serial.println("SUCCESS");
-    hasMAX = true;
-    max30102.setup(60, 4, 2, 100, 411, 4096); 
-  } else { Serial.println("FAILED"); }
+        function triggerAlert(alertType) {
+            const now = Date.now();
+            if (now - lastAlertTimes[alertType] < 30000) return; 
+            lastAlertTimes[alertType] = now;
 
-  Serial.print("Booting MPU6050... ");
-  I2C_Clinical.beginTransmission(0x68);
-  if (I2C_Clinical.endTransmission() == 0) foundMpuAddress = 0x68;
-  else {
-    I2C_Clinical.beginTransmission(0x69);
-    if (I2C_Clinical.endTransmission() == 0) foundMpuAddress = 0x69;
-  }
-  if (foundMpuAddress != 0x00) wakeMPU6050(foundMpuAddress);
-  else Serial.println("FAILED");
+            const text = VOICE_ALERTS['en'][alertType];
+            const langCode = TTS_LANG_MAP['en'];
 
-  Serial.print("Booting LoRa RFM95... ");
-  SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
-  LoRa.setPins(LORA_CS, LORA_RST, LORA_DIO0);
-  if (LoRa.begin(865E6)) {
-    Serial.println("SUCCESS (865 MHz IN865 Band)");
-    hasLoRa = true;
-  } else { Serial.println("FAILED"); }
+            if ('speechSynthesis' in window) {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = langCode;
+                utterance.rate = 0.9; 
+                window.speechSynthesis.speak(utterance);
+            }
+        }
 
-  Serial.println("\nStarting BLE Server...");
-  BLEDevice::init("SIH_OMNI_STACK");
-  pServer = BLEDevice::createServer();
-  pServer->setCallbacks(new MyServerCallbacks());
-  BLEService *pService = pServer->createService(SERVICE_UUID);
-  pCharacteristic = pService->createCharacteristic(
-                      CHARACTERISTIC_UUID,
-                      BLECharacteristic::PROPERTY_READ   |
-                      BLECharacteristic::PROPERTY_NOTIFY
-                    );
-  pCharacteristic->addDescriptor(new BLE2902());
-  pService->start();
-  BLEDevice::getAdvertising()->start();
-  
-  Serial.println("Launching FreeRTOS Tasks...\n");
+        function updateLanguageUI() {
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                if(UI_I18N[currentLang] && UI_I18N[currentLang][key]) el.innerText = UI_I18N[currentLang][key];
+            });
+            ['st', 'gsr', 'hr', 'spo2'].forEach(k => { if(phiMasks[k]) { const el = document.getElementById(`pro-val-${k}`); if(el) el.innerText = t("SECURE"); } });
+        }
 
-  xTaskCreatePinnedToCore(Task_Clinical, "Clinical", 4096, NULL, 3, NULL, 1);
-  xTaskCreatePinnedToCore(Task_BLE, "BLE", 4096, NULL, 2, NULL, 0);
-  xTaskCreatePinnedToCore(Task_Env_UI, "EnvUI", 8192, NULL, 1, NULL, 0);
-}
+        window.openThresholdModal = function(key) {
+            activeModalKey = key;
+            const config = aiThresholds[key];
+            const titles = { st: "Body Temp", gsr: "GSR Tone", hr: "Heart Rate", spo2: "Blood Oxygen", z: "Kinematics", env: "Air Quality" };
+            document.getElementById('modalTitle').innerText = `${titles[key]} Config`;
+            
+            const slider = document.getElementById('modalSlider');
+            slider.min = config.min; slider.max = config.max; slider.step = config.step; slider.value = config.val;
+            document.getElementById('modalValDisplay').innerText = config.val;
+            document.getElementById('modalThresholdDesc').innerText = config.desc;
+            
+            const phiContainer = document.getElementById('phiUnlockContainer');
+            if(['st', 'gsr', 'hr', 'spo2'].includes(key)) {
+                phiContainer.classList.remove('hidden');
+                document.getElementById('modalPhiToggle').checked = !phiMasks[key]; 
+            } else {
+                phiContainer.classList.add('hidden');
+            }
+            document.getElementById('thresholdModal').classList.replace('hidden', 'flex');
+        };
 
-void loop() {
-  vTaskDelay(1000 / portTICK_PERIOD_MS); 
-}
+        window.closeThresholdModal = function() {
+            document.getElementById('thresholdModal').classList.replace('flex', 'hidden');
+        };
+
+        document.getElementById('modalSlider').oninput = (e) => {
+            document.getElementById('modalValDisplay').innerText = e.target.value;
+        };
+
+        window.saveThresholdModal = function() {
+            if(!activeModalKey) return;
+            aiThresholds[activeModalKey].val = parseFloat(document.getElementById('modalSlider').value);
+            
+            // we flip the logic here: if the toggle is checked, the mask is FALSE (meaning data is unlocked and visible)
+            if(['st', 'gsr', 'hr', 'spo2'].includes(activeModalKey)) {
+                phiMasks[activeModalKey] = !document.getElementById('modalPhiToggle').checked; 
+            }
+            closeThresholdModal();
+        };
+
+        // pre-filling the chart.js array with 50 zeroes so the ui doesn't look broken when it boots up empty
+        let chartDataStore = { hr: Array(50).fill(0), st: Array(50).fill(0), gsr: Array(50).fill(0), z: Array(50).fill(0) };
+        let currentChartKey = 'hr';
+        
+        const ctx = document.getElementById('multiChart');
+        if (ctx) {
+            multiChart = new Chart(ctx.getContext('2d'), {
+                type: 'line',
+                data: { labels: Array(50).fill(''), datasets: [{ data: chartDataStore['hr'], borderColor: '#06b6d4', borderWidth: 2, tension: 0.4, pointRadius: 0, fill: true, backgroundColor: 'rgba(6, 182, 212, 0.15)' }] },
+                options: {
+                    responsive: true, maintainAspectRatio: false, animation: { duration: 0 },
+                    scales: { 
+                        x: { display: false }, 
+                        y: { display: true, border: {display: false}, grid: { color: 'rgba(148, 163, 184, 0.2)' }, ticks: { color: '#64748b', font: {size: 9} } } 
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        function updateChartTheme() {
+            if(!multiChart) return;
+            const isDark = document.documentElement.classList.contains('dark');
+            multiChart.options.scales.y.grid.color = isDark ? 'rgba(51, 65, 85, 0.4)' : 'rgba(203, 213, 225, 0.6)';
+            multiChart.options.scales.y.ticks.color = isDark ? '#94a3b8' : '#64748b';
+            multiChart.update();
+        }
+
+        document.getElementById('chartSelector').addEventListener('change', (e) => {
+            currentChartKey = e.target.value;
+            multiChart.data.datasets[0].data = chartDataStore[currentChartKey];
+            
+            let color = '#06b6d4'; 
+            if(currentChartKey === 'st') color = '#f97316'; 
+            if(currentChartKey === 'gsr') color = '#14b8a6';
+            if(currentChartKey === 'z') color = '#a855f7'; 
+            
+            multiChart.data.datasets[0].borderColor = color;
+            multiChart.data.datasets[0].backgroundColor = color + '25';
+            multiChart.update();
+        });
+
+        // pulling physical gps coords using the browser api to prepare the sos payload
+        if (navigator.geolocation) {
+            navigator.geolocation.watchPosition((pos) => {
+                const locEl = document.getElementById('my-gps-cords');
+                if(locEl) {
+                    locEl.innerHTML = `Live GPS Active<br><span class="text-[9px] text-slate-500 font-normal">${pos.coords.latitude.toFixed(4)}° N, ${pos.coords.longitude.toFixed(4)}° E</span>`;
+                }
+            }, (err) => {
+                const locEl = document.getElementById('my-gps-cords');
+                if(locEl) locEl.innerHTML = `GPS Unavailable<br><span class="text-[9px] text-slate-500 font-normal">Check location permissions</span>`;
+            }, { enableHighAccuracy: true });
+        }
+
+        const BLE_SERVICE_UUID = "19b10000-e8f2-537e-4f6c-d104768a1214";
+        const BLE_CHARACTERISTIC_UUID = "19b10001-e8f2-537e-4f6c-d104768a1214";
+        let bluetoothDevice;
+
+        // the web bluetooth api is strict. it requires a user gesture (like a button click) 
+        // to open the pairing menu. that's why we tie all initialization to this connect button.
+        document.getElementById('ble-connect-btn').onclick = async () => {
+            
+            // browsers block audio until the user interacts with the page, so we play 
+            // a silent sound here to unlock the tts engine early for future emergency alerts.
+            if ('speechSynthesis' in window) {
+                let silent = new SpeechSynthesisUtterance('');
+                silent.volume = 0;
+                window.speechSynthesis.speak(silent);
+            }
+
+            try {
+                if (!navigator.bluetooth) { 
+                    handleBLEError("WebBluetooth API not available in this browser.");
+                    return; 
+                }
+                
+                bluetoothDevice = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [BLE_SERVICE_UUID] });
+                const server = await bluetoothDevice.gatt.connect();
+                const service = await server.getPrimaryService(BLE_SERVICE_UUID);
+                const rxCharacteristic = await service.getCharacteristic(BLE_CHARACTERISTIC_UUID);
+                
+                await rxCharacteristic.startNotifications();
+                rxCharacteristic.addEventListener('characteristicvaluechanged', handleNotifications);
+
+                document.getElementById('ble-connect-btn').className = "px-2.5 py-1.5 rounded-lg bg-emerald-500 text-white text-xs font-bold flex items-center shadow-md";
+                document.getElementById('ble-connect-btn').innerHTML = `<i class="ph-bold ph-bluetooth"></i>`;
+                
+                const sosBtn = document.getElementById('lora-sos-btn');
+                if (sosBtn) {
+                    sosBtn.disabled = false;
+                    sosBtn.innerHTML = `<i class="ph-bold ph-broadcast text-rose-500 text-lg"></i> Broadcast My SOS`;
+                }
+
+                logToTerminal("[System] BLE GATT Link Established. Receiving telemetry.", "good");
+
+            } catch (error) { 
+                handleBLEError(error.message); 
+            }
+        };
+
+        function handleBLEError(msg) {
+            const alertCont = document.getElementById('user-alert-container');
+            if(alertCont) {
+                alertCont.innerHTML = `<div class="bg-rose-50 dark:bg-rose-900/10 border border-rose-200 dark:border-rose-800/50 rounded-lg p-2 flex items-center gap-2"><i class="ph-fill ph-warning text-rose-500"></i><span class="text-[9px] font-bold text-rose-600 dark:text-rose-400 uppercase">BLE Connection Failed: ${msg}</span></div>`;
+            }
+            logToTerminal(`[Error] ${msg}`, "alert");
+        }
+
+        function handleNotifications(event) {
+            const jsonString = new TextDecoder('utf-8').decode(event.target.value);
+            try { 
+                const data = JSON.parse(jsonString);
+                processIncomingData(data);
+            } catch(e) {} 
+        }
+
+        function logToTerminal(msg, type = 'info') {
+            const term = document.getElementById('ai-terminal-logs');
+            if(!term) return;
+            const div = document.createElement('div');
+            
+            if (type === 'alert') div.className = 'text-rose-400 font-bold';
+            else if (type === 'good') div.className = 'text-emerald-400 font-bold';
+            else div.className = 'text-slate-300';
+            
+            div.innerHTML = msg;
+            term.prepend(div);
+            // keep the console clean so it doesnt lag the browser
+            if(term.children.length > 20) term.lastChild.remove();
+        }
+
+        function setGauge(id, value, maxVal) {
+            const circle = document.getElementById(id);
+            if(!circle) return;
+            const circumference = 251.2;
+            const pct = Math.min(Math.max(value / maxVal, 0), 1);
+            circle.style.strokeDashoffset = circumference - (pct * circumference);
+        }
+
+        // simulates passing updated settings blocks via BLE back down to the hardware
+        const otaBtn = document.getElementById('btn-ota-sync');
+        if (otaBtn) {
+            otaBtn.onclick = () => {
+                otaBtn.disabled = true;
+                otaBtn.innerHTML = `<i class="ph-bold ph-spinner animate-spin"></i> Flashing...`;
+                otaBtn.className = "w-full bg-cyan-600 text-white py-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md shadow-cyan-500/20";
+                
+                logToTerminal("[OTA] Compiling personalized triage thresholds...", "info");
+                setTimeout(() => logToTerminal("[OTA] Uploading rules block via BLE GATT...", "info"), 1200);
+                
+                setTimeout(() => {
+                    otaBtn.innerHTML = `<i class="ph-bold ph-check-circle"></i> Update Complete`;
+                    otaBtn.className = "w-full bg-emerald-500 text-white py-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md shadow-emerald-500/20";
+                    logToTerminal("[OTA] Edge device thresholds updated successfully.", "good");
+                    
+                    setTimeout(() => {
+                        otaBtn.disabled = false;
+                        otaBtn.innerHTML = `<i class="ph-bold ph-arrows-clockwise"></i> Update Threshold Rules (OTA)`;
+                        otaBtn.className = "w-full bg-slate-800 dark:bg-slate-700 hover:bg-slate-700 dark:hover:bg-slate-600 text-white py-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 active:scale-95 shadow-md";
+                    }, 3000);
+                }, 2800);
+            };
+        }
+
+        window.triggerLoRaSOS = function() {
+            if(!bluetoothDevice) return; // cant tell the esp32 to broadcast if its not connected over ble
+            const btn = document.getElementById('lora-sos-btn');
+            const homeBtn = document.getElementById('btn-sos-user');
+            
+            if(btn) {
+                btn.innerHTML = `<i class="ph-bold ph-spinner animate-spin text-lg"></i> TRANSMITTING...`;
+                btn.classList.replace('bg-slate-800', 'bg-orange-500');
+                btn.classList.replace('dark:bg-slate-700', 'dark:bg-orange-500');
+            }
+            if(homeBtn) {
+                homeBtn.innerHTML = `<i class="ph-bold ph-spinner animate-spin text-lg"></i> TRANSMITTING...`;
+            }
+
+            logToTerminal("[LoRa] TX ACTIVE: Broadcasting SOS Packet on 865MHz...", "alert");
+            
+            setTimeout(() => {
+                if(btn) {
+                    btn.innerHTML = `<i class="ph-bold ph-check-circle text-lg"></i> SOS BROADCASTED`;
+                    btn.classList.replace('bg-orange-500', 'bg-emerald-500');
+                    btn.classList.replace('dark:bg-orange-500', 'dark:bg-emerald-500');
+                }
+                if(homeBtn) homeBtn.innerHTML = `<i class="ph-bold ph-check-circle text-lg"></i> SENT`;
+
+                logToTerminal("[LoRa] TX SUCCESS: Distress signal broadcast to mesh.", "good");
+                
+                setTimeout(() => {
+                    if(btn) {
+                        btn.innerHTML = `<i class="ph-bold ph-broadcast text-rose-500 text-lg"></i> Broadcast My SOS`;
+                        btn.classList.replace('bg-emerald-500', 'bg-slate-800');
+                        btn.classList.replace('dark:bg-emerald-500', 'dark:bg-slate-700');
+                    }
+                    if(homeBtn) homeBtn.innerHTML = `<i class="ph-bold ph-warning text-2xl"></i> SOS EMERGENCY`;
+                }, 3000);
+            }, 1500);
+        };
+
+        function processIncomingData(data) {
+            
+            // we check if the IR value from the MAX30102 drops. if it's below 50k, the watch is probably off the wrist.
+            isDeviceWorn = (data.ir !== undefined && data.ir > 50000); 
+
+            // write to LocalStorage at a throttled 0.2Hz rate to prevent browser lockups from the fast 10Hz BLE stream
+            if (isLoggingEnabled && isDeviceWorn) {
+                const now = Date.now();
+                if (now - lastLogTime > 5000) {
+                    lastLogTime = now;
+                    try {
+                        const logEntry = {
+                            timestamp: new Date().toISOString(),
+                            temp: data.st ? data.st.toFixed(1) : "--",
+                            hr: data.bpm ? data.bpm : "--",
+                            spo2: data.spo2 ? data.spo2 : "--",
+                            gsr: data.gsr ? data.gsr : "--",
+                            kinematics: data.z ? data.z.toFixed(2) : "--",
+                            voc: data.g ? data.g.toFixed(1) : "--"
+                        };
+                        localDataLog.push(logEntry);
+                        if (localDataLog.length > 10000) localDataLog.shift();
+                        localStorage.setItem('qyra_telemetry', JSON.stringify(localDataLog));
+                    } catch(e) {} 
+                }
+            }
+
+            if(data.bat !== undefined) {
+                const batBadge = document.getElementById('battery-badge');
+                if(batBadge) batBadge.style.display = 'flex';
+                const batText = document.getElementById('bat-text');
+                if(batText) batText.innerText = `${data.bat}%`;
+                const setBat = document.getElementById('settings-bat');
+                if(setBat) setBat.innerText = `${data.bat}%`;
+                const batIcon = document.getElementById('bat-icon');
+                if(batIcon) batIcon.className = data.bat > 20 ? "ph-fill ph-battery-medium text-emerald-500" : "ph-fill ph-battery-warning text-rose-500 animate-pulse";
+            }
+
+            // mapping the hardware fault flags directly to visual dot indicators
+            const bmeDot = document.getElementById('diag-bme-dot');
+            if(bmeDot) bmeDot.className = data.bme ? "w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "w-2 h-2 rounded-full bg-rose-500";
+            const maxDot = document.getElementById('diag-max-dot');
+            if(maxDot) maxDot.className = data.max ? "w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "w-2 h-2 rounded-full bg-rose-500";
+            const mpuDot = document.getElementById('diag-mpu-dot');
+            if(mpuDot) mpuDot.className = data.mpu ? "w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "w-2 h-2 rounded-full bg-rose-500";
+            const mlxDot = document.getElementById('diag-mlx-dot');
+            if(mlxDot) mlxDot.className = data.mlx ? "w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "w-2 h-2 rounded-full bg-rose-500";
+
+            let gsrInsight = "OFF-WRIST";
+            if(isDeviceWorn && data.gsr !== undefined) {
+                if (data.gsr > aiThresholds.gsr.val) gsrInsight = "PROFUSE";
+                else if (data.gsr > (aiThresholds.gsr.val * 0.6)) gsrInsight = "SWEATY";
+                else if (data.gsr > (aiThresholds.gsr.val * 0.2)) gsrInsight = "NORMAL";
+                else gsrInsight = "DRY";
+            }
+
+            let stInsight = "OFF-WRIST";
+            if(isDeviceWorn && data.st !== undefined) {
+                if (data.st > aiThresholds.st.val) stInsight = "ELEVATED";
+                else stInsight = "STABLE";
+            }
+
+            if (isDeviceWorn) {
+                const userPredSt = document.getElementById('user-pred-st');
+                if(userPredSt) {
+                    userPredSt.innerText = t(stInsight);
+                    userPredSt.className = (stInsight==="STABLE") ? "text-lg font-black uppercase text-emerald-500 mt-1" : "text-lg font-black uppercase text-rose-500 mt-1";
+                }
+                
+                let hrInsight = "RESTING";
+                if (data.spo2 !== undefined && data.spo2 < aiThresholds.spo2.val) hrInsight = "HYPOXIA";
+                else if (data.bpm !== undefined && data.bpm > aiThresholds.hr.val) hrInsight = "ELEVATED";
+                else if (data.bpm !== undefined && data.bpm > 0 && data.bpm < 50) hrInsight = "LOW";
+
+                const userPredHr = document.getElementById('user-pred-hr');
+                if(userPredHr) {
+                    userPredHr.innerText = t(hrInsight);
+                    userPredHr.className = (hrInsight==="RESTING") ? "text-lg font-black uppercase text-emerald-500 mt-1" : "text-lg font-black uppercase text-rose-500 mt-1";
+                }
+                
+                let zInsight = (data.z !== undefined && data.z > aiThresholds.z.val) ? "IMPACT" : "NOMINAL";
+                const userPredZ = document.getElementById('user-pred-z');
+                if(userPredZ) {
+                    userPredZ.innerText = t(zInsight);
+                    userPredZ.className = (zInsight==="IMPACT") ? "text-lg font-black uppercase text-rose-500 mt-1" : "text-lg font-black uppercase text-emerald-500 mt-1";
+                }
+
+                // Core triage engine evaluation. we check combined states to avoid false positive triggers.
+                let heatstrokeTriggered = false;
+
+                if (data.z !== undefined && data.z > aiThresholds.z.val) {
+                    triggerAlert('fall');
+                    logToTerminal(`[ALERT] Fall Impact threshold breached!`, "alert");
+                }
+                if (data.st !== undefined && data.st > aiThresholds.st.val && data.gsr !== undefined && data.gsr > (aiThresholds.gsr.val * 0.5) && data.bpm !== undefined && data.bpm > aiThresholds.hr.val) {
+                    triggerAlert('heatstroke');
+                    logToTerminal(`[ALERT] High body temp + sweat + elevated pulse.`, "alert");
+                    heatstrokeTriggered = true;
+                }
+                if (data.st !== undefined && data.st > aiThresholds.st.val && data.h !== undefined && data.h > 75) {
+                    triggerAlert('ventilation');
+                    logToTerminal(`[ALERT] High ambient temp + high humidity detected.`, "alert");
+                    heatstrokeTriggered = true;
+                }
+                if (data.bpm !== undefined && data.bpm > aiThresholds.hr.val && !heatstrokeTriggered) {
+                    triggerAlert('cardiac');
+                }
+                if (data.st !== undefined && data.st > aiThresholds.st.val && !heatstrokeTriggered) {
+                    triggerAlert('fever');
+                }
+                if (data.spo2 !== undefined && data.spo2 > 0 && data.spo2 < aiThresholds.spo2.val) {
+                    triggerAlert('hypoxia');
+                }
+                if (data.g !== undefined && data.g < aiThresholds.env.val && data.z !== undefined && data.z > 12) {
+                    triggerAlert('respiratory');
+                }
+
+                const statEl = document.getElementById('user-main-status');
+                if(statEl) {
+                    statEl.innerText = t("Optimal");
+                    statEl.className = "text-3xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight";
+                }
+                const subEl = document.getElementById('user-main-sub');
+                if(subEl) {
+                    subEl.innerText = t("All Systems Normal");
+                    subEl.className = "text-[10px] font-bold text-emerald-500 dark:text-emerald-500/80 uppercase tracking-widest mt-1 text-center leading-tight px-4";
+                }
+                const ringEl = document.getElementById('user-main-ring');
+                if(ringEl) ringEl.className = "w-56 h-56 rounded-full border-[14px] border-emerald-400 flex flex-col items-center justify-center bg-emerald-50 dark:bg-emerald-900/10 shadow-[0_0_40px_rgba(52,211,153,0.2)] animate-breathe-mint transition-colors";
+
+            } else {
+                ['st', 'hr', 'z'].forEach(k => {
+                    const el = document.getElementById(`user-pred-${k}`);
+                    if(el) { el.innerText = t("OFF-WRIST"); el.className = "text-lg font-black uppercase text-slate-400 mt-1"; }
+                });
+                
+                const statEl = document.getElementById('user-main-status');
+                if(statEl) { statEl.innerText = t("Standby"); statEl.className = "text-3xl font-black text-slate-400"; }
+                
+                const subEl = document.getElementById('user-main-sub');
+                if(subEl) { subEl.innerText = t("Please Wear Device"); subEl.className = "text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1"; }
+                
+                const ringEl = document.getElementById('user-main-ring');
+                if(ringEl) ringEl.className = "w-56 h-56 rounded-full border-[14px] border-slate-200 dark:border-slate-700/50 flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-800/30 transition-colors";
+            }
+
+            if (isDeviceWorn) {
+                const stValEl = document.getElementById('pro-val-st');
+                if(stValEl) {
+                    if(phiMasks.st) {
+                        stValEl.innerText = t(stInsight);
+                        stValEl.className = "text-[11px] font-black text-slate-800 dark:text-white leading-none tracking-tight";
+                        document.getElementById('unit-st').innerText = "";
+                    } else {
+                        stValEl.innerText = (data.st !== undefined) ? data.st.toFixed(1) : "--";
+                        stValEl.className = "text-xl font-black text-slate-800 dark:text-white leading-none tracking-tighter";
+                        document.getElementById('unit-st').innerText = "°C";
+                    }
+                }
+                setGauge('gauge-st', data.st !== undefined ? data.st : 0, 50);
+
+                const gsrValEl = document.getElementById('pro-val-gsr');
+                if(gsrValEl) {
+                    if(phiMasks.gsr) {
+                        gsrValEl.innerText = t(gsrInsight);
+                        gsrValEl.className = "text-[11px] font-black text-slate-800 dark:text-white leading-none tracking-tight";
+                        document.getElementById('unit-gsr').innerText = "";
+                    } else {
+                        gsrValEl.innerText = (data.gsr !== undefined) ? data.gsr : "--";
+                        gsrValEl.className = "text-xl font-black text-slate-800 dark:text-white leading-none tracking-tighter";
+                        document.getElementById('unit-gsr').innerText = "raw";
+                    }
+                }
+                setGauge('gauge-gsr', data.gsr !== undefined ? data.gsr : 0, 3500);
+                
+                const hrValEl = document.getElementById('pro-val-hr');
+                let hrInsightPro = "RESTING";
+                if (data.bpm !== undefined && data.bpm > aiThresholds.hr.val) hrInsightPro = "ELEVATED";
+                else if (data.bpm !== undefined && data.bpm > 0 && data.bpm < 50) hrInsightPro = "LOW";
+
+                if(hrValEl) {
+                    if(phiMasks.hr) {
+                        hrValEl.innerText = t(hrInsightPro);
+                        hrValEl.className = "text-[11px] font-black text-slate-800 dark:text-white leading-none tracking-tight";
+                        document.getElementById('unit-hr').innerText = "";
+                    } else {
+                        hrValEl.innerText = (data.bpm !== undefined) ? data.bpm : "--";
+                        hrValEl.className = "text-xl font-black text-slate-800 dark:text-white leading-none tracking-tighter";
+                        document.getElementById('unit-hr').innerText = "BPM";
+                    }
+                }
+                setGauge('gauge-hr', data.bpm !== undefined ? data.bpm : 0, 180);
+
+                const spo2ValEl = document.getElementById('pro-val-spo2');
+                let spo2InsightPro = "NORMAL";
+                if (data.spo2 !== undefined && data.spo2 > 0 && data.spo2 < aiThresholds.spo2.val) spo2InsightPro = "HYPOXIA";
+
+                if(spo2ValEl) {
+                    if(phiMasks.spo2) {
+                        spo2ValEl.innerText = t(spo2InsightPro);
+                        spo2ValEl.className = "text-[11px] font-black text-slate-800 dark:text-white leading-none tracking-tight";
+                        document.getElementById('unit-spo2').innerText = "";
+                    } else {
+                        spo2ValEl.innerText = (data.spo2 !== undefined) ? data.spo2 : "--";
+                        spo2ValEl.className = "text-xl font-black text-slate-800 dark:text-white leading-none tracking-tighter";
+                        document.getElementById('unit-spo2').innerText = "%";
+                    }
+                }
+                setGauge('gauge-spo2', data.spo2 !== undefined ? data.spo2 : 0, 100);
+
+                if(data.bpm !== undefined) { chartDataStore.hr.push(data.bpm); chartDataStore.hr.shift(); }
+                if(data.st !== undefined) { chartDataStore.st.push(data.st); chartDataStore.st.shift(); }
+                if(data.gsr !== undefined) { chartDataStore.gsr.push(data.gsr); chartDataStore.gsr.shift(); }
+            } else {
+                ['st', 'gsr', 'hr', 'spo2'].forEach(k => {
+                    const el = document.getElementById(`pro-val-${k}`);
+                    if(el) { el.innerText = "--"; el.className = "text-xl font-black text-slate-400 leading-none"; }
+                    const unitEl = document.getElementById(`unit-${k}`);
+                    if(unitEl) unitEl.innerText = "";
+                    setGauge(`gauge-${k}`, 0, 100);
+                });
+            }
+
+            const zValEl = document.getElementById('pro-val-z');
+            if(zValEl && data.z !== undefined) {
+                zValEl.innerText = data.z.toFixed(1);
+                setGauge('gauge-z', data.z, 30);
+                chartDataStore.z.push(data.z); chartDataStore.z.shift();
+            }
+
+            let gasInsight = "CLEAN AIR";
+            const gasValEl = document.getElementById('pro-val-gas');
+            const predGasEl = document.getElementById('user-pred-gas');
+            
+            if(gasValEl) {
+                const safeG = data.g !== undefined ? data.g.toFixed(0) : '--';
+                gasValEl.innerHTML = `${safeG}<span class="text-[8px] font-normal text-slate-500 ml-0.5">kΩ</span>`;
+            }
+            
+            if (data.g !== undefined && data.g > 0 && data.g < aiThresholds.env.val) {
+                if(predGasEl) predGasEl.className = "text-lg font-black uppercase text-rose-500 mt-1";
+                gasInsight = "POOR AIR";
+            } else {
+                gasInsight = "CLEAN AIR";
+                if(predGasEl) {
+                    predGasEl.innerText = t(gasInsight);
+                    predGasEl.className = "text-lg font-black uppercase text-emerald-500 mt-1";
+                }
+            }
+
+            const tempEl = document.getElementById('pro-val-temp');
+            if(tempEl && data.t !== undefined) tempEl.innerHTML = `${data.t.toFixed(1)}<span class="text-[8px] font-normal text-slate-500 ml-0.5">°C</span>`;
+            
+            const humEl = document.getElementById('pro-val-hum');
+            if(humEl && data.h !== undefined) humEl.innerHTML = `${data.h.toFixed(1)}<span class="text-[8px] font-normal text-slate-500 ml-0.5">%</span>`;
+            
+            const pressEl = document.getElementById('pro-val-press');
+            if(pressEl) pressEl.innerHTML = `1013<span class="text-[8px] font-normal text-slate-500 ml-0.5">hPa</span>`; 
+
+            // prevents ui jitter by only printing to the dom terminal on a fraction of the incoming packets
+            if (isDeviceWorn && Math.random() > 0.95) {
+                logToTerminal(`[Telemetry] Dual-bus metrics updated gracefully.`, "info");
+            }
+
+            if(multiChart) {
+                multiChart.data.datasets[0].data = chartDataStore[currentChartKey];
+                multiChart.update();
+            }
+        }
+    </script>
+</body>
+</html>
