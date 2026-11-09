@@ -5,7 +5,7 @@ This folder contains the Web Bluetooth (WebBLE) companion dashboards used for ra
 Before we move into production and build the final cross-platform mobile application (Flutter), we needed a lightweight way to connect to the ESP32-S3 prototype, visualize the 10Hz telemetry, and validate our TinyML models in real-time. Because this runs entirely in the browser using the Web Bluetooth API, it allows us to test the hardware-software handshake instantly without constantly compiling and side-loading APKs.
 
 ### 📁 Version History
-* **`index_v1_baseline.html`**: Our initial V1 prototype dashboard. We used this to validate the raw I2C sensor stream and test basic client-side health thresholds before we had a working neural network.
+* **`index_v1_baseline_telemetry.html`**: Our initial V1 prototype dashboard. We used this to validate the raw I2C sensor stream and test basic client-side health thresholds before we had a working neural network.
 * **`index_v2_edge_ai.html`**: The active V2 dashboard. It relies on the ESP32-S3's native TinyML engine for logic. This serves as our primary bench tool for NVS provisioning and Edge AI validation.
 
 ### 🧠 V2 Dashboard Capabilities
