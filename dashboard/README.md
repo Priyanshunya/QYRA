@@ -1,4 +1,4 @@
-# QYRA WebBLE Engineering Dashboard (Pre-Market)
+# QYRA WebBLE Engineering User Dashboard
 
 This folder contains the Web Bluetooth (WebBLE) companion dashboards used for rapid prototyping, hardware validation, and AI debugging. 
 
