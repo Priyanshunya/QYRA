@@ -16,10 +16,10 @@ To prevent high-frequency UI refreshes on the OLED screen from blocking the sens
   * *BME680* (Ambient Temperature, Humidity, and VOC Gas Resistance)
   * *SH1106G* (1.3" OLED Triage Display)
 
-### 🧩 Prototype Assembly & Component Layout
-| Component Breakdown | Assembled Prototype (Front & Back) |
-| :---: | :---: |
-| ![Components](./v1_prototype_components.jpeg) | ![Front View](./v1_prototype_front.jpeg)<br>![Back View](./v1_prototype_back.jpeg) |
+### Prototype Assembly & Component Layout
+| Component Breakdown | Assembled Prototype (Front) | Assembled Prototype (Back) |
+| :---: | :---: | :---: |
+| ![Components](./v1_prototype_components.jpeg) | ![Front View](./v1_prototype_front.jpeg) | ![Back View](./v1_prototype_back.jpeg) |
 
 ### 📋 Bill of Materials (BOM)
 | Component | Function | Interface / Part |
