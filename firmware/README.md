@@ -4,7 +4,7 @@ This directory tracks the evolution of the QYRA hardware prototype on the ESP32-
 
 ### Directory Structure
 * **`v1_baseline_telemetry/`**: Our initial prototype. It successfully established the I2C sensor array and basic Bluetooth GATT communication, but relied on basic thresholds (heuristics) that were prone to false positives during physical movement.
-* **`v2_heuristic_triage/`**: The current production prototype. We migrated from hardcoded heuristics to an 8-bit quantized TinyML neural network. 
+* **`v2_edge_ai_triage/`**: The current production prototype. We migrated from hardcoded heuristics to an 8-bit quantized TinyML neural network. 
 
 ### Key Upgrades in V2
 * **FreeRTOS Dual-Core Pinning:** Clinical sensors are pinned to Core 1 at 50Hz, while AI inference and UI updates are isolated on Core 0.
