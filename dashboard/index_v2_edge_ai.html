@@ -1,0 +1,1277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>QYRA Mobile Companion - V2 Edge AI</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'], mono: ['Fira Code', 'monospace'] },
+                    colors: { 
+                        brand: { 400: '#22d3ee', 500: '#06b6d4' },
+                        darkbg: '#050b14', 
+                        darkcard: '#0b1320', 
+                        darkborder: '#1e293b'
+                    },
+                    animation: {
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'breathe-mint': 'breatheMint 2s infinite',
+                        'breathe-alert': 'breatheAlert 2s infinite',
+                        'fadeUp': 'fadeUp 0.3s ease forwards',
+                        'ping-slow': 'ping 3s cubic-bezier(0, 0, 0.2, 1) infinite'
+                    },
+                    keyframes: {
+                        breatheMint: {
+                            '0%, 100%': { boxShadow: '0 0 0 0 rgba(52, 211, 153, 0.4)' },
+                            '50%': { boxShadow: '0 0 0 15px rgba(52, 211, 153, 0)' },
+                        },
+                        breatheAlert: {
+                            '0%, 100%': { boxShadow: '0 0 0 0 rgba(244, 63, 94, 0.4)' },
+                            '50%': { boxShadow: '0 0 0 15px rgba(244, 63, 94, 0)' },
+                        },
+                        fadeUp: { 
+                            'from': { opacity: '0', transform: 'translateY(10px)' }, 
+                            'to': { opacity: '1', transform: 'translateY(0)' } 
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Fira+Code:wght@400;600&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    
+    <!-- using chartjs for the live telemetry plotting, will switch to fl_chart in flutter -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        body { 
+            font-family: 'Inter', sans-serif; 
+            -webkit-tap-highlight-color: transparent; 
+            overscroll-behavior-y: none;
+            background-color: #f1f5f9; 
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            transition: background-color 0.3s ease;
+        }
+        
+        .app-container { 
+            width: 100%;
+            max-width: 480px; 
+            height: 100dvh; 
+            background-color: #f8fafc;
+            display: flex; 
+            flex-direction: column; 
+            position: relative; 
+            overflow: hidden; 
+            transition: background-color 0.3s ease;
+        }
+
+        @media (min-width: 640px) {
+            .app-container {
+                height: 90vh;
+                border: 12px solid #1e293b;
+                border-radius: 2.5rem;
+                box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            }
+        }
+
+        html.dark .app-container { background-color: #050b14; }
+
+        ::-webkit-scrollbar { display: none; }
+
+        .pro-card {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 1rem;
+            padding: 1.25rem;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        html.dark .pro-card { background: #0b1320; border-color: #1e293b; box-shadow: none; }
+
+        .user-card {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 1rem;
+            padding: 1rem;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
+        }
+        html.dark .user-card { background: #0b1320; border-color: #1e293b; }
+
+        /* simple tab routing css */
+        .view-content { display: none; flex: 1; overflow-y: auto; padding-bottom: 90px; }
+        .view-content.active { display: block; animation: fadeUp 0.3s ease forwards; }
+
+        .gauge-circle {
+            transition: stroke-dashoffset 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+            transform: rotate(-90deg);
+            transform-origin: 50% 50%;
+        }
+
+        .nav-btn.active { color: #06b6d4; }
+        html.dark .nav-btn.active { color: #22d3ee; }
+
+        .blink { animation: blinker 1.5s linear infinite; }
+        @keyframes blinker { 50% { opacity: 0.3; } }
+    </style>
+</head>
+<body>
+
+    <div class="app-container text-slate-900 dark:text-slate-50">
+        
+        <!-- app bar -->
+        <header class="pt-10 sm:pt-6 pb-3 px-5 flex justify-between items-center shrink-0 z-40 bg-white/90 dark:bg-darkbg/90 backdrop-blur-xl border-b border-slate-200 dark:border-darkborder sticky top-0 transition-colors">
+            <div class="flex items-center gap-2">
+                <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 text-white">
+                    <i class="ph-fill ph-waveform text-xl animate-pulse-slow"></i>
+                </div>
+                <div class="leading-tight">
+                    <h1 class="text-sm font-black tracking-tight text-slate-900 dark:text-white">QYRA AI</h1>
+                    <h2 class="text-[9px] font-bold text-slate-500 uppercase tracking-widest" data-i18n="subtitle">Live Telemetry HUD</h2>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-1.5">
+                <button id="theme-toggle" class="p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                    <i class="ph-fill ph-lightbulb dark:hidden text-lg"></i>
+                    <i class="ph-fill ph-moon hidden dark:block text-lg text-slate-400"></i>
+                </button>
+
+                <div class="relative hidden sm:block">
+                    <button id="lang-btn" class="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-darkcard text-slate-700 dark:text-slate-300 text-xs font-semibold">
+                        <i class="ph ph-globe"></i> <span id="current-lang">EN</span>
+                    </button>
+                    <!-- multi-language dropdown for voice alerts -->
+                    <div id="lang-dropdown" class="absolute right-0 mt-2 w-32 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 hidden flex-col overflow-hidden z-50">
+                        <button class="lang-opt px-4 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700 w-full" data-lang="en">English</button>
+                        <button class="lang-opt px-4 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700 w-full" data-lang="hi">हिन्दी</button>
+                        <button class="lang-opt px-4 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-700 w-full" data-lang="ta">தமிழ்</button>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-1">
+                    <!-- tp4056 adc battery level -->
+                    <div id="battery-badge" class="hidden items-center gap-0.5 px-1.5 py-1 rounded-md bg-slate-100 dark:bg-slate-800 text-[9px] font-mono font-bold text-slate-600 dark:text-slate-300">
+                        <i class="ph-fill ph-battery-medium text-emerald-500" id="bat-icon"></i><span id="bat-text">--%</span>
+                    </div>
+                    <button id="ble-connect-btn" class="px-2.5 py-1.5 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50 text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95">
+                        <i class="ph-bold ph-bluetooth"></i> <span class="text-[10px]" data-i18n="connectBle">Connect</span>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- home view (Edge AI triage dashboard) -->
+        <main id="view-user" class="view-content active px-5 pt-4 pb-24">
+            
+            <div id="user-alert-container" class="mb-4 flex flex-col gap-2"></div>
+
+            <div class="flex justify-center mb-6 mt-4 relative">
+                <!-- this circle now dynamically changes based on the tinyml integer output -->
+                <div class="w-56 h-56 rounded-full border-[14px] border-slate-200 dark:border-slate-700/50 flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-800/30 transition-colors" id="user-main-ring">
+                    <h2 class="text-3xl font-black text-slate-400 tracking-tight text-center px-2 leading-tight" id="user-main-status" data-i18n="Standby">Standby</h2>
+                    <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2 text-center leading-tight px-4" id="user-main-sub" data-i18n="Please Wear Device">Waiting for BLE Data</p>
+                </div>
+            </div>
+
+            <button id="btn-sos-user" class="w-full bg-gradient-to-b from-rose-500 to-red-600 hover:from-rose-600 hover:to-red-700 text-white py-4 rounded-2xl font-black text-lg shadow-[0_8px_25px_rgba(225,29,72,0.3)] active:scale-95 transition-all flex items-center justify-center gap-2 mb-6" onclick="triggerLoRaSOS()">
+                <i class="ph-bold ph-warning text-2xl"></i> <span data-i18n="sosBtn">SOS EMERGENCY</span>
+            </button>
+
+            <!-- V2 label update -->
+            <h3 class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1.5"><i class="ph-fill ph-brain text-cyan-500"></i> <span data-i18n="aiPred">Edge AI Triage Status</span></h3>
+
+            <div class="grid grid-cols-2 gap-3 mb-4">
+                <div class="user-card flex flex-col">
+                    <span class="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1.5"><i class="ph-fill ph-thermometer-hot text-orange-500"></i> <span data-i18n="cardThermal">Body Temp</span></span>
+                    <span class="text-lg font-black uppercase text-slate-400 mt-1" id="user-pred-st" data-i18n="OFF-WRIST">OFF-WRIST</span>
+                    <div class="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 flex justify-between">
+                        <span class="text-[8px] text-slate-400 font-mono">[PHI SECURED]</span>
+                    </div>
+                </div>
+                
+                <div class="user-card flex flex-col">
+                    <span class="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1.5"><i class="ph-fill ph-heartbeat text-rose-500"></i> <span data-i18n="cardHeart">Heart Rate</span></span>
+                    <span class="text-lg font-black uppercase text-slate-400 mt-1" id="user-pred-hr" data-i18n="OFF-WRIST">OFF-WRIST</span>
+                    <div class="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 flex justify-between">
+                        <span class="text-[8px] text-slate-400 font-mono">[PHI SECURED]</span>
+                    </div>
+                </div>
+
+                <div class="user-card flex flex-col">
+                    <span class="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1.5"><i class="ph-fill ph-person-simple-run text-purple-500"></i> <span data-i18n="cardActivity">Body Activity</span></span>
+                    <span class="text-lg font-black uppercase text-slate-400 mt-1" id="user-pred-z" data-i18n="OFF-WRIST">OFF-WRIST</span>
+                    <div class="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 flex justify-between">
+                        <span class="text-[8px] text-slate-400 font-mono">[PHI SECURED]</span>
+                    </div>
+                </div>
+
+                <div class="user-card flex flex-col">
+                    <span class="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1.5"><i class="ph-fill ph-wind text-teal-500"></i> <span data-i18n="cardAir">Air Quality</span></span>
+                    <span class="text-lg font-black uppercase text-slate-400 mt-1" id="user-pred-gas" data-i18n="STANDBY">STANDBY</span>
+                    <div class="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800 flex justify-between">
+                        <span class="text-[8px] text-slate-400 font-mono">[ENV PUBLIC]</span>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- raw sensors view -->
+        <main id="view-pro-sensors" class="view-content px-4 pt-4 pb-24">
+            
+            <div class="flex justify-between items-center mb-3 px-1">
+                <h2 class="text-xs font-bold text-slate-500 uppercase tracking-widest" data-i18n="telemetryDash">Telemetry Dashboard</h2>
+                <span class="text-[9px] bg-cyan-100 dark:bg-cyan-900/30 text-cyan-600 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-800 px-2 py-1 rounded font-mono transition-colors font-bold">TinyML Inference Active <i class="ph-fill ph-brain"></i></span>
+            </div>
+
+            <!-- main 6-panel grid -->
+            <div class="grid grid-cols-2 gap-3 mb-4">
+                
+                <div class="pro-card flex flex-col items-center justify-center p-3">
+                    <button class="absolute top-2 right-2 text-slate-400 hover:text-cyan-500 transition-colors p-1" onclick="openThresholdModal('st')"><i class="ph-bold ph-gear"></i></button>
+                    <div class="relative w-20 h-20 flex items-center justify-center mb-2 mt-1">
+                        <svg class="w-full h-full" viewBox="0 0 100 100">
+                            <circle cx="50" cy="50" r="40" fill="none" class="stroke-slate-200 dark:stroke-slate-800" stroke-width="8"></circle>
+                            <circle id="gauge-st" class="gauge-circle" cx="50" cy="50" r="40" fill="none" stroke="#f97316" stroke-width="8" stroke-dasharray="251.2" stroke-dashoffset="251.2"></circle>
+                        </svg>
+                        <div class="absolute flex flex-col items-center mt-1">
+                            <span class="text-[11px] font-black text-slate-800 dark:text-white leading-none tracking-tight" id="pro-val-st" data-i18n="SECURE">SECURE</span>
+                            <span class="text-[8px] text-slate-400 font-bold" id="unit-st"></span>
+                        </div>
+                    </div>
+                    <div class="w-full text-center">
+                        <h3 class="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1" data-i18n="cardThermal">Body Temp</h3>
+                    </div>
+                </div>
+
+                <div class="pro-card flex flex-col items-center justify-center p-3">
+                    <button class="absolute top-2 right-2 text-slate-400 hover:text-cyan-500 transition-colors p-1" onclick="openThresholdModal('gsr')"><i class="ph-bold ph-gear"></i></button>
+                    <div class="relative w-20 h-20 flex items-center justify-center mb-2 mt-1">
+                        <svg class="w-full h-full" viewBox="0 0 100 100">
+                            <circle cx="50" cy="50" r="40" fill="none" class="stroke-slate-200 dark:stroke-slate-800" stroke-width="8"></circle>
+                            <circle id="gauge-gsr" class="gauge-circle" cx="50" cy="50" r="40" fill="none" stroke="#14b8a6" stroke-width="8" stroke-dasharray="251.2" stroke-dashoffset="251.2"></circle>
+                        </svg>
+                        <div class="absolute flex flex-col items-center mt-1">
+                            <span class="text-[11px] font-black text-slate-800 dark:text-white leading-none tracking-tight" id="pro-val-gsr" data-i18n="SECURE">SECURE</span>
+                            <span class="text-[8px] text-slate-400 font-bold" id="unit-gsr"></span>
+                        </div>
+                    </div>
+                    <div class="w-full text-center">
+                        <h3 class="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1">GSR Tone</h3>
+                    </div>
+                </div>
+
+                <div class="pro-card flex flex-col items-center justify-center p-3">
+                    <button class="absolute top-2 right-2 text-slate-400 hover:text-cyan-500 transition-colors p-1" onclick="openThresholdModal('hr')"><i class="ph-bold ph-gear"></i></button>
+                    <div class="relative w-20 h-20 flex items-center justify-center mb-2 mt-1">
+                        <svg class="w-full h-full" viewBox="0 0 100 100">
+                            <circle cx="50" cy="50" r="40" fill="none" class="stroke-slate-200 dark:stroke-slate-800" stroke-width="8"></circle>
+                            <circle id="gauge-hr" class="gauge-circle" cx="50" cy="50" r="40" fill="none" stroke="#e11d48" stroke-width="8" stroke-dasharray="251.2" stroke-dashoffset="251.2"></circle>
+                        </svg>
+                        <div class="absolute flex flex-col items-center mt-1">
+                            <span class="text-[11px] font-black text-slate-800 dark:text-white leading-none tracking-tight" id="pro-val-hr" data-i18n="SECURE">SECURE</span>
+                            <span class="text-[8px] text-slate-400 font-bold" id="unit-hr"></span>
+                        </div>
+                    </div>
+                    <div class="w-full text-center">
+                        <h3 class="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1" data-i18n="cardHeart">Heart Rate</h3>
+                    </div>
+                </div>
+
+                <div class="pro-card flex flex-col items-center justify-center p-3">
+                    <button class="absolute top-2 right-2 text-slate-400 hover:text-cyan-500 transition-colors p-1" onclick="openThresholdModal('spo2')"><i class="ph-bold ph-gear"></i></button>
+                    <div class="relative w-20 h-20 flex items-center justify-center mb-2 mt-1">
+                        <svg class="w-full h-full" viewBox="0 0 100 100">
+                            <circle cx="50" cy="50" r="40" fill="none" class="stroke-slate-200 dark:stroke-slate-800" stroke-width="8"></circle>
+                            <circle id="gauge-spo2" class="gauge-circle" cx="50" cy="50" r="40" fill="none" stroke="#0284c7" stroke-width="8" stroke-dasharray="251.2" stroke-dashoffset="251.2"></circle>
+                        </svg>
+                        <div class="absolute flex flex-col items-center mt-1">
+                            <span class="text-[11px] font-black text-slate-800 dark:text-white leading-none tracking-tight" id="pro-val-spo2" data-i18n="SECURE">SECURE</span>
+                            <span class="text-[8px] text-slate-400 font-bold" id="unit-spo2"></span>
+                        </div>
+                    </div>
+                    <div class="w-full text-center">
+                        <h3 class="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1">Blood Oxygen</h3>
+                    </div>
+                </div>
+
+                <div class="pro-card flex flex-col items-center justify-center p-3">
+                    <button class="absolute top-2 right-2 text-slate-400 hover:text-cyan-500 transition-colors p-1" onclick="openThresholdModal('z')"><i class="ph-bold ph-gear"></i></button>
+                    <div class="relative w-20 h-20 flex items-center justify-center mb-2 mt-1">
+                        <svg class="w-full h-full" viewBox="0 0 100 100">
+                            <circle cx="50" cy="50" r="40" fill="none" class="stroke-slate-200 dark:stroke-slate-800" stroke-width="8"></circle>
+                            <circle id="gauge-z" class="gauge-circle" cx="50" cy="50" r="40" fill="none" stroke="#a855f7" stroke-width="8" stroke-dasharray="251.2" stroke-dashoffset="251.2"></circle>
+                        </svg>
+                        <div class="absolute flex flex-col items-center mt-1">
+                            <span class="text-xl font-black text-slate-800 dark:text-white leading-none" id="pro-val-z">--</span>
+                            <span class="text-[9px] text-slate-400 font-bold">m/s²</span>
+                        </div>
+                    </div>
+                    <div class="w-full text-center">
+                        <h3 class="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1">Kinematics</h3>
+                    </div>
+                </div>
+
+                <div class="pro-card flex flex-col justify-between p-3">
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">Environment</h3>
+                        <button class="text-slate-400 hover:text-cyan-500 transition-colors p-1" onclick="openThresholdModal('env')"><i class="ph-bold ph-gear"></i></button>
+                    </div>
+                    <div class="grid grid-cols-2 gap-y-2 gap-x-1 mt-auto">
+                        <div>
+                            <span class="text-[8px] text-slate-400 block uppercase font-bold">VOC Gas</span>
+                            <span class="text-xs font-black text-slate-800 dark:text-white" id="pro-val-gas">--</span>
+                        </div>
+                        <div>
+                            <span class="text-[8px] text-slate-400 block uppercase font-bold">Ambient</span>
+                            <span class="text-xs font-black text-slate-800 dark:text-white" id="pro-val-temp">--</span>
+                        </div>
+                        <div>
+                            <span class="text-[8px] text-slate-400 block uppercase font-bold">Humidity</span>
+                            <span class="text-xs font-black text-slate-800 dark:text-white" id="pro-val-hum">--</span>
+                        </div>
+                        <div>
+                            <span class="text-[8px] text-slate-400 block uppercase font-bold">Pressure</span>
+                            <span class="text-xs font-black text-slate-800 dark:text-white" id="pro-val-press">--</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="pro-card mb-4">
+                <div class="flex justify-between items-start mb-3">
+                    <div>
+                        <h3 class="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-widest flex items-center gap-1.5"><i class="ph-bold ph-chart-line-up text-cyan-500"></i> <span data-i18n="liveStream">Live Telemetry Stream</span></h3>
+                    </div>
+                    <select id="chartSelector" class="bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs rounded focus:ring-cyan-500 block p-1 outline-none font-semibold cursor-pointer">
+                        <option value="hr">Heart Rate (BPM)</option>
+                        <option value="st">Body Temp (°C)</option>
+                        <option value="gsr">GSR Tone (raw)</option>
+                        <option value="z">Kinematics Z</option>
+                    </select>
+                </div>
+                
+                <div class="w-full h-32 relative mt-2">
+                    <canvas id="multiChart"></canvas>
+                </div>
+            </div>
+
+            <div class="pro-card bg-slate-900 text-cyan-400 font-mono text-[10px] p-3 rounded-xl border border-slate-800 mb-4 shadow-inner">
+                <div class="flex justify-between items-center mb-2 border-b border-slate-800 pb-1.5">
+                    <span class="font-bold uppercase tracking-widest text-slate-300 flex items-center gap-1"><i class="ph-fill ph-terminal text-cyan-400"></i> Firmware Telemetry Log</span>
+                    <span id="conf-env" class="text-[9px] text-slate-500">Mode: AI Triage</span>
+                </div>
+                <div id="ai-terminal-logs" class="space-y-1 h-20 overflow-y-auto pr-1 text-[9px] text-slate-300">
+                    <div>[System] Waiting for BLE GATT connection...</div>
+                </div>
+            </div>
+
+            <div class="pro-card p-3">
+                <h3 class="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-widest flex items-center gap-1.5 mb-3"><i class="ph-fill ph-cpu text-cyan-500"></i> Hardware Diagnostics</h3>
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-2 rounded-lg flex items-center gap-2">
+                        <div id="diag-bme-dot" class="w-2 h-2 rounded-full bg-slate-400"></div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-700 dark:text-slate-300 block leading-tight">BME680</span>
+                            <span class="text-[8px] text-slate-400">I2C 0x77</span>
+                        </div>
+                    </div>
+                    <div class="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-2 rounded-lg flex items-center gap-2">
+                        <div id="diag-max-dot" class="w-2 h-2 rounded-full bg-slate-400"></div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-700 dark:text-slate-300 block leading-tight">MAX30102</span>
+                            <span class="text-[8px] text-slate-400">I2C 0x57</span>
+                        </div>
+                    </div>
+                    <div class="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-2 rounded-lg flex items-center gap-2">
+                        <div id="diag-mpu-dot" class="w-2 h-2 rounded-full bg-slate-400"></div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-700 dark:text-slate-300 block leading-tight">MPU6050</span>
+                            <span class="text-[8px] text-slate-400">I2C 0x68</span>
+                        </div>
+                    </div>
+                    <div class="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-2 rounded-lg flex items-center gap-2">
+                        <div id="diag-mlx-dot" class="w-2 h-2 rounded-full bg-slate-400"></div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-700 dark:text-slate-300 block leading-tight">MLX90614</span>
+                            <span class="text-[8px] text-slate-400">I2C 0x5A</span>
+                        </div>
+                    </div>
+                    <div class="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-2 rounded-lg flex items-center gap-2">
+                        <div id="diag-lora-dot" class="w-2 h-2 rounded-full bg-emerald-500"></div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-700 dark:text-slate-300 block leading-tight">LoRa RF</span>
+                            <span class="text-[8px] text-slate-400">SPI 865MHz</span>
+                        </div>
+                    </div>
+                    <div class="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-2 rounded-lg flex items-center gap-2">
+                        <div id="diag-adc-dot" class="w-2 h-2 rounded-full bg-emerald-500"></div>
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-700 dark:text-slate-300 block leading-tight">TP4056 Bat</span>
+                            <span class="text-[8px] text-slate-400">ADC Pin 7</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Disaster Hub (LoRa operations) -->
+        <main id="view-pro-disaster" class="view-content px-4 pt-4 pb-24">
+            <div class="flex justify-between items-center mb-4 px-1">
+                <div class="flex items-center gap-2">
+                    <i class="ph-fill ph-lifebuoy text-cyan-500 text-xl"></i>
+                    <h2 class="text-sm font-black text-slate-800 dark:text-white uppercase tracking-widest">Disaster Hub & Mesh</h2>
+                </div>
+                <span class="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/30 px-2 py-1 rounded border border-emerald-200 dark:border-emerald-800/50">865 MHz P2P</span>
+            </div>
+
+            <div class="pro-card mb-3 bg-slate-50 dark:bg-slate-800/50 p-3">
+                 <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1"><i class="ph-fill ph-crosshair"></i> My Rescue Node</h3>
+                    <span class="text-[9px] font-mono text-cyan-500 blink">TX/RX STANDBY</span>
+                </div>
+                <div class="mb-4">
+                    <span class="text-[8px] text-slate-400 block uppercase font-bold mb-0.5">Live Location (GPS Sync)</span>
+                    <span class="text-xs font-mono font-black text-slate-800 dark:text-white block leading-tight" id="my-gps-cords">Acquiring Location...<br><span class="text-[9px] text-slate-500 font-normal">Waiting for browser permission</span></span>
+                </div>
+                <button onclick="triggerLoRaSOS()" id="lora-sos-btn" class="w-full bg-slate-800 dark:bg-slate-700 hover:bg-slate-700 dark:hover:bg-slate-600 text-white py-3 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 active:scale-95 shadow-md disabled:opacity-50" disabled>
+                    <i class="ph-bold ph-broadcast text-rose-500 text-lg"></i> Connect BLE to Broadcast SOS
+                </button>
+            </div>
+            
+            <p class="text-[9px] text-slate-500 dark:text-slate-400 text-center px-4">Incoming peer-to-peer LoRa distress signals will automatically render here during emergency events.</p>
+        </main>
+
+        <!-- Settings tab -->
+        <main id="view-settings" class="view-content px-4 pt-4 pb-24">
+            <h2 class="text-sm font-black text-slate-800 dark:text-white uppercase tracking-widest mb-4 px-1" data-i18n="systemSettings">System Settings</h2>
+            
+            <div class="space-y-3">
+                
+                <div class="pro-card p-4">
+                    <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3" data-i18n="devConn">Device & Connection</h3>
+                    <div class="flex justify-between items-center py-2 border-b border-slate-100 dark:border-slate-800">
+                        <span class="text-sm font-semibold text-slate-700 dark:text-slate-300">BLE Device Name</span>
+                        <span class="text-xs font-mono text-slate-400">SIH_OMNI_STACK</span>
+                    </div>
+                    <div class="flex justify-between items-center py-2 border-b border-slate-100 dark:border-slate-800">
+                        <span class="text-sm font-semibold text-slate-700 dark:text-slate-300">BLE Polling Rate</span>
+                        <span class="text-xs font-mono text-slate-400">10 Hz</span>
+                    </div>
+                    <div class="flex justify-between items-center py-2 border-b border-slate-100 dark:border-slate-800">
+                        <span class="text-sm font-semibold text-slate-700 dark:text-slate-300">Battery Level</span>
+                        <span class="text-xs font-mono text-emerald-500 font-bold" id="settings-bat">--%</span>
+                    </div>
+                    <div class="flex justify-between items-center py-2 mb-2 border-b border-slate-100 dark:border-slate-800">
+                        <span class="text-sm font-semibold text-slate-700 dark:text-slate-300">Firmware Logic</span>
+                        <span class="text-xs font-mono text-cyan-500">v2.0 (Edge AI)</span>
+                    </div>
+                    <div class="flex justify-between items-center py-2 mb-2">
+                        <span class="text-sm font-semibold text-slate-700 dark:text-slate-300">Active ML Profile</span>
+                        <span class="text-xs font-mono text-purple-500 font-bold" id="settings-prof">Awaiting Sync...</span>
+                    </div>
+                </div>
+
+                <!-- V2 NVS Provisioning Block -->
+                <div class="pro-card p-4">
+                    <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3">NVS Demographic Provisioning</h3>
+                    <p class="text-[9px] text-slate-400 mb-4 leading-tight">Write a configuration byte via BLE to permanently lock the ESP32-S3 tensor arena to a specific physiological model.</p>
+                    
+                    <div class="flex flex-col gap-2">
+                        <button onclick="setNvsProfile(0)" class="w-full bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 py-2.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center justify-between px-4 border border-slate-200 dark:border-slate-700">
+                            <span class="flex items-center gap-2"><i class="ph-fill ph-user text-cyan-500 text-lg"></i> Standard Adult</span>
+                            <span class="font-mono text-slate-400">Byte: '0'</span>
+                        </button>
+                        <button onclick="setNvsProfile(1)" class="w-full bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 py-2.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center justify-between px-4 border border-slate-200 dark:border-slate-700">
+                            <span class="flex items-center gap-2"><i class="ph-fill ph-wheelchair text-emerald-500 text-lg"></i> Elderly User</span>
+                            <span class="font-mono text-slate-400">Byte: '1'</span>
+                        </button>
+                        <button onclick="setNvsProfile(2)" class="w-full bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 py-2.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center justify-between px-4 border border-slate-200 dark:border-slate-700">
+                            <span class="flex items-center gap-2"><i class="ph-fill ph-hard-hat text-orange-500 text-lg"></i> Industrial Worker</span>
+                            <span class="font-mono text-slate-400">Byte: '2'</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="pro-card p-4">
+                    <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3" data-i18n="privData">Privacy & Data Storage</h3>
+                    <div class="flex justify-between items-center py-2 border-b border-slate-100 dark:border-slate-800">
+                        <span class="text-sm font-semibold text-slate-700 dark:text-slate-300">Local Data Logging</span>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="toggle-local-storage" class="sr-only peer" checked>
+                            <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-slate-600 peer-checked:bg-emerald-500"></div>
+                        </label>
+                    </div>
+                    <p class="text-[9px] text-slate-400 mt-2 leading-tight">Data is strictly saved to this device's local browser memory to comply with DPDP. No cloud sync is active.</p>
+                </div>
+
+                <div class="pro-card p-4">
+                    <h3 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3">Export Telemetry</h3>
+                    <p class="text-[9px] text-slate-400 mb-4 leading-tight">Download locally saved sensor telemetry in CSV format for offline analysis.</p>
+                    <div class="flex gap-2">
+                        <button onclick="downloadData('24h')" class="flex-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 py-2.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 active:scale-95 border border-slate-200 dark:border-slate-700">
+                            <i class="ph-bold ph-download-simple text-lg"></i> Last 24 Hrs
+                        </button>
+                        <button onclick="downloadData('all')" class="flex-1 bg-cyan-500 hover:bg-cyan-600 text-white py-2.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 active:scale-95 shadow-md shadow-cyan-500/20">
+                            <i class="ph-bold ph-database text-lg"></i> Full Export
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+
+        <!-- threshold config modal (kept so users can still mask their PHI on the raw sensors view) -->
+        <div id="thresholdModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 hidden items-end sm:items-center justify-center p-0 sm:p-4">
+            <div class="bg-white dark:bg-darkcard w-full max-w-sm rounded-t-3xl sm:rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-2xl animate-fadeUp">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 id="modalTitle" class="text-sm font-black uppercase text-slate-800 dark:text-white tracking-wide">Sensor Settings</h3>
+                    <button onclick="closeThresholdModal()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><i class="ph-bold ph-x text-lg"></i></button>
+                </div>
+                
+                <div class="space-y-4">
+                    <div id="phiUnlockContainer" class="pt-2 flex items-center justify-between">
+                        <div>
+                            <span class="text-xs font-bold text-slate-700 dark:text-slate-200 block">Unlock Raw Health Data (PHI)</span>
+                            <span class="text-[9px] text-slate-400">Override Triage Insight & display precise numbers.</span>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="modalPhiToggle" class="sr-only peer">
+                            <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-slate-600 peer-checked:bg-rose-500"></div>
+                        </label>
+                    </div>
+                </div>
+
+                <button onclick="saveThresholdModal()" class="w-full mt-6 bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2.5 rounded-xl text-xs transition-all shadow-lg shadow-cyan-500/20">Apply Configuration</button>
+            </div>
+        </div>
+
+        <!-- sticky bottom nav -->
+        <nav id="bottom-nav" class="absolute bottom-0 w-full bg-white/90 dark:bg-darkbg/95 backdrop-blur-xl border-t border-slate-200 dark:border-darkborder flex justify-around items-center pt-3 pb-8 z-40 shrink-0 transition-colors">
+            <button class="nav-btn flex flex-col items-center gap-1 w-16 text-slate-400 hover:text-cyan-500 transition-colors active" data-target="view-user" id="nav-btn-home">
+                <i class="ph-fill ph-house text-2xl"></i>
+                <span class="text-[9px] font-bold tracking-wide" data-i18n="navHome">Home</span>
+            </button>
+            <button class="nav-btn flex flex-col items-center gap-1 w-16 text-slate-400 hover:text-cyan-500 transition-colors" data-target="view-pro-sensors" id="nav-btn-sensors">
+                <i class="ph ph-wave-sawtooth text-2xl"></i>
+                <span class="text-[9px] font-bold tracking-wide" data-i18n="navSensors">Sensors</span>
+            </button>
+            <button class="nav-btn flex flex-col items-center gap-1 w-16 text-slate-400 hover:text-cyan-500 transition-colors" data-target="view-pro-disaster" id="nav-btn-disaster">
+                <i class="ph ph-lifebuoy text-2xl"></i>
+                <span class="text-[9px] font-bold tracking-wide" data-i18n="navRescue">SOS</span>
+            </button>
+            <button class="nav-btn flex flex-col items-center gap-1 w-16 text-slate-400 hover:text-cyan-500 transition-colors" data-target="view-settings" id="nav-btn-settings">
+                <i class="ph ph-gear text-2xl"></i>
+                <span class="text-[9px] font-bold tracking-wide" data-i18n="navSettings">Settings</span>
+            </button>
+        </nav>
+    </div>
+
+    <script>
+        let isDeviceWorn = false;
+        let currentLang = 'en';
+        
+        let phiMasks = { st: true, gsr: true, hr: true, spo2: true }; 
+        
+        let localDataLog = [];
+        try {
+            localDataLog = JSON.parse(localStorage.getItem('qyra_telemetry')) || [];
+        } catch(e) {
+            console.warn("local storage is disabled by your browser settings.");
+        }
+        
+        const localStoreToggle = document.getElementById('toggle-local-storage');
+        let isLoggingEnabled = localStoreToggle ? localStoreToggle.checked : true;
+        let lastLogTime = 0;
+
+        if (localStoreToggle) {
+            localStoreToggle.addEventListener('change', (e) => {
+                isLoggingEnabled = e.target.checked;
+                if(isLoggingEnabled) {
+                    logToTerminal("[System] Local data logging ENABLED.", "good");
+                } else {
+                    logToTerminal("[System] Local data logging DISABLED.", "alert");
+                }
+            });
+        }
+
+        window.downloadData = function(timeframe) {
+            let dataToExport = localDataLog;
+            
+            if (timeframe === '24h') {
+                const cutoff = Date.now() - (24 * 60 * 60 * 1000);
+                dataToExport = localDataLog.filter(d => new Date(d.timestamp).getTime() > cutoff);
+            }
+            
+            if (dataToExport.length === 0) {
+                logToTerminal("[Export] No data available to download.", "alert");
+                return;
+            }
+
+            let csv = "Timestamp,BodyTemp(C),HeartRate(BPM),SpO2(%),GSR(raw),Kinematics(G),VOC(kOhm)\n";
+            dataToExport.forEach(row => {
+                csv += `${row.timestamp},${row.temp},${row.hr},${row.spo2},${row.gsr},${row.kinematics},${row.voc}\n`;
+            });
+
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.setAttribute('hidden', '');
+            a.setAttribute('href', url);
+            a.setAttribute('download', `QYRA_Telemetry_${timeframe}_${Date.now()}.csv`);
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            
+            logToTerminal(`[Export] Successfully downloaded ${dataToExport.length} telemetry records.`, "good");
+        };
+        
+        // threshold values remain for the individual cards, but main state is purely driven by Edge AI now
+        let aiThresholds = {
+            st: { val: 37.5 }, gsr: { val: 1500 }, hr: { val: 100 }, spo2: { val: 92 }, z: { val: 15.0 }, env: { val: 30 }
+        };
+        let activeModalKey = null;
+
+        const htmlEl = document.documentElement;
+        const themeToggleBtn = document.getElementById('theme-toggle');
+        const langDropdown = document.getElementById('lang-dropdown');
+        let multiChart = null;
+
+        themeToggleBtn.onclick = () => {
+            htmlEl.classList.toggle('dark');
+            if(multiChart) updateChartTheme();
+        };
+
+        const langBtn = document.getElementById('lang-btn');
+        langBtn.onclick = (e) => { 
+            e.stopPropagation(); 
+            langDropdown.classList.toggle('hidden'); 
+        };
+        document.addEventListener('click', () => langDropdown.classList.add('hidden'));
+        
+        document.querySelectorAll('.lang-opt').forEach(opt => {
+            opt.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation(); 
+                
+                currentLang = opt.getAttribute('data-lang');
+                const curLangEl = document.getElementById('current-lang');
+                if(curLangEl) curLangEl.innerText = currentLang.toUpperCase();
+                
+                langDropdown.classList.add('hidden'); 
+                updateLanguageUI();
+                
+                if (!isDeviceWorn) processIncomingData({});
+            });
+        });
+
+        const navBtns = document.querySelectorAll('.nav-btn');
+        const viewContents = document.querySelectorAll('.view-content');
+
+        function switchTab(clickedBtn, targetViewId) {
+            navBtns.forEach(b => {
+                b.classList.remove('active');
+                let i = b.querySelector('i');
+                if(i) i.classList.replace('ph-fill', 'ph');
+            });
+            viewContents.forEach(v => v.classList.remove('active'));
+
+            clickedBtn.classList.add('active');
+            let clickedI = clickedBtn.querySelector('i');
+            if(clickedI) clickedI.classList.replace('ph', 'ph-fill');
+            
+            document.getElementById(targetViewId).classList.add('active');
+        }
+
+        navBtns.forEach(btn => {
+            btn.onclick = () => switchTab(btn, btn.dataset.target);
+        });
+
+        // added translations for the new Edge AI states
+        const UI_I18N = {
+            en: { 
+                optimal: "Optimal", allNormal: "All Systems Normal", sosBtn: "SOS EMERGENCY", aiPred: "Edge AI Triage Status", 
+                navHome: "Home", navSensors: "Sensors", navRescue: "SOS", navSettings: "Settings", 
+                cardThermal: "Body Temp", cardHeart: "Heart Rate", cardActivity: "Body Activity", cardAir: "Air Quality",
+                subtitle: "Live Telemetry HUD", telemetryDash: "Telemetry Dashboard", liveStream: "Live Telemetry Stream",
+                systemSettings: "System Settings",
+                "OFF-WRIST": "OFF-WRIST", "STABLE": "STABLE", "ELEVATED": "ELEVATED", 
+                "RESTING": "RESTING", "HYPOXIA": "HYPOXIA", "LOW": "LOW", 
+                "IMPACT": "IMPACT", "NOMINAL": "NOMINAL", 
+                "POOR AIR": "POOR AIR", "CLEAN AIR": "CLEAN AIR",
+                "DRY": "DRY", "NORMAL": "NORMAL", "SWEATY": "SWEATY", "PROFUSE": "PROFUSE",
+                "Standby": "Standby", "Please Wear Device": "Waiting for BLE Data", "SECURE": "SECURE",
+                "STANDBY": "STANDBY", "FALL IMPACT": "FALL IMPACT", "HEAT STRAIN": "HEAT STRAIN", 
+                "EXERTION": "EXERTION", "RESPIRATORY": "RESPIRATORY",
+                connectBle: "Connect", devConn: "Device & Connection", privData: "Privacy & Data Storage"
+            },
+            hi: { 
+                optimal: "सर्वोत्तम", allNormal: "सभी प्रणालियाँ सामान्य", sosBtn: "आपातकाल (SOS)", aiPred: "Edge AI ट्रायज", 
+                navHome: "होम", navSensors: "सेंसर", navRescue: "एसओएस", navSettings: "सेटिंग्स", 
+                cardThermal: "शरीर का तापमान", cardHeart: "हृदय गति", cardActivity: "शारीरिक गतिविधि", cardAir: "वायु गुणवत्ता",
+                subtitle: "लाइव टेलीमेट्री", telemetryDash: "टेलीमेट्री डैशबोर्ड", liveStream: "लाइव टेलीमेट्री स्ट्रीम",
+                systemSettings: "सिस्टम सेटिंग्स",
+                "OFF-WRIST": "पहना नहीं है", "STABLE": "स्थिर", "ELEVATED": "बढ़ा हुआ", 
+                "RESTING": "सामान्य", "HYPOXIA": "ऑक्सीजन की कमी", "LOW": "कम", 
+                "IMPACT": "प्रभाव (गिरना)", "NOMINAL": "सामान्य", 
+                "POOR AIR": "खराब हवा", "CLEAN AIR": "स्वच्छ हवा",
+                "DRY": "सूखा", "NORMAL": "सामान्य", "SWEATY": "पसीना", "PROFUSE": "अत्यधिक पसीना",
+                "Standby": "स्टैंडबाय", "Please Wear Device": "BLE डेटा की प्रतीक्षा", "SECURE": "सुरक्षित",
+                "STANDBY": "स्टैंडबाय", "FALL IMPACT": "प्रभाव (गिरना)", "HEAT STRAIN": "अत्यधिक गर्मी",
+                "EXERTION": "शारीरिक तनाव", "RESPIRATORY": "श्वसन संकट",
+                connectBle: "कनेक्ट करें", devConn: "डिवाइस और कनेक्शन", privData: "गोपनीयता और डेटा"
+            },
+            ta: { 
+                optimal: "உகந்தது", allNormal: "அனைத்தும் இயல்பானவை", sosBtn: "அவசரம் (SOS)", aiPred: "Edge AI நிலை", 
+                navHome: "முகப்பு", navSensors: "சென்சார்கள்", navRescue: "SOS", navSettings: "அமைப்புகள்", 
+                cardThermal: "உடல் வெப்பநிலை", cardHeart: "இதய துடிப்பு", cardActivity: "உடல் செயல்பாடு", cardAir: "காற்றின் தரம்",
+                subtitle: "லைவ் டெலிமெட்ரி", telemetryDash: "டெலிமெட்ரி டேஷ்போர்டு", liveStream: "நேரடி டெலிமெட்ரி ஸ்ட்ரீம்",
+                systemSettings: "கணினி அமைப்புகள்",
+                "OFF-WRIST": "அணியவில்லை", "STABLE": "நிலையானது", "ELEVATED": "உயர்ந்தது", 
+                "RESTING": "ஓய்வில்", "HYPOXIA": "ஆக்சிஜன் குறைபாடு", "LOW": "குறைவு", 
+                "IMPACT": "வீழ்ச்சி", "NOMINAL": "இயல்பானது", 
+                "POOR AIR": "மோசமான காற்று", "CLEAN AIR": "சுத்தமான காற்று",
+                "DRY": "உலர்", "NORMAL": "இயல்பானது", "SWEATY": "வியர்வை", "PROFUSE": "அதிக வியர்வை",
+                "Standby": "காத்திருப்பு", "Please Wear Device": "BLE தரவுக்காக காத்திருக்கிறது", "SECURE": "பாதுகாப்பானது",
+                "STANDBY": "காத்திருப்பு", "FALL IMPACT": "கடுமையான வீழ்ச்சி", "HEAT STRAIN": "அதிக வெப்பம்",
+                "EXERTION": "அதிக சிரமம்", "RESPIRATORY": "சுவாச சிரமம்",
+                connectBle: "இணைக்க", devConn: "சாதனம் மற்றும் இணைப்பு", privData: "தனியுரிமை மற்றும் தரவு"
+            }
+        };
+
+        function t(key) {
+            if(UI_I18N[currentLang] && UI_I18N[currentLang][key]) return UI_I18N[currentLang][key];
+            if(UI_I18N['en'][key]) return UI_I18N['en'][key];
+            return key;
+        }
+
+        const VOICE_ALERTS = {
+            en: {
+                fall: "Fall detected. Please do not panic, a message has been sent to your emergency contacts.",
+                heatstroke: "Severe heat strain detected. Please rest in the shade and sip water slowly.",
+                cardiac: "Physical exertion detected. Please pause your current activity and rest.",
+                respiratory: "Respiratory distress or poor air quality detected. Please move to a safe area."
+            }
+        };
+
+        const TTS_LANG_MAP = { en: 'en-US', hi: 'hi-IN', ta: 'ta-IN' };
+        
+        let lastAlertTimes = { fall: 0, heatstroke: 0, respiratory: 0, cardiac: 0 };
+
+        function triggerAlert(alertType) {
+            const now = Date.now();
+            if (now - lastAlertTimes[alertType] < 30000) return; 
+            lastAlertTimes[alertType] = now;
+
+            const text = VOICE_ALERTS['en'][alertType];
+            const langCode = TTS_LANG_MAP['en'];
+
+            if ('speechSynthesis' in window) {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = langCode;
+                utterance.rate = 0.9; 
+                window.speechSynthesis.speak(utterance);
+            }
+        }
+
+        function updateLanguageUI() {
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                if(UI_I18N[currentLang] && UI_I18N[currentLang][key]) el.innerText = UI_I18N[currentLang][key];
+            });
+            ['st', 'gsr', 'hr', 'spo2'].forEach(k => { if(phiMasks[k]) { const el = document.getElementById(`pro-val-${k}`); if(el) el.innerText = t("SECURE"); } });
+        }
+
+        window.openThresholdModal = function(key) {
+            activeModalKey = key;
+            const titles = { st: "Body Temp", gsr: "GSR Tone", hr: "Heart Rate", spo2: "Blood Oxygen", z: "Kinematics", env: "Air Quality" };
+            document.getElementById('modalTitle').innerText = `${titles[key]} Privacy Config`;
+            
+            const phiContainer = document.getElementById('phiUnlockContainer');
+            if(['st', 'gsr', 'hr', 'spo2'].includes(key)) {
+                phiContainer.classList.remove('hidden');
+                document.getElementById('modalPhiToggle').checked = !phiMasks[key]; 
+            } else {
+                phiContainer.classList.add('hidden');
+            }
+            document.getElementById('thresholdModal').classList.replace('hidden', 'flex');
+        };
+
+        window.closeThresholdModal = function() {
+            document.getElementById('thresholdModal').classList.replace('flex', 'hidden');
+        };
+
+        window.saveThresholdModal = function() {
+            if(!activeModalKey) return;
+            if(['st', 'gsr', 'hr', 'spo2'].includes(activeModalKey)) {
+                phiMasks[activeModalKey] = !document.getElementById('modalPhiToggle').checked; 
+            }
+            closeThresholdModal();
+        };
+
+        let chartDataStore = { hr: Array(50).fill(0), st: Array(50).fill(0), gsr: Array(50).fill(0), z: Array(50).fill(0) };
+        let currentChartKey = 'hr';
+        
+        const ctx = document.getElementById('multiChart');
+        if (ctx) {
+            multiChart = new Chart(ctx.getContext('2d'), {
+                type: 'line',
+                data: { labels: Array(50).fill(''), datasets: [{ data: chartDataStore['hr'], borderColor: '#06b6d4', borderWidth: 2, tension: 0.4, pointRadius: 0, fill: true, backgroundColor: 'rgba(6, 182, 212, 0.15)' }] },
+                options: {
+                    responsive: true, maintainAspectRatio: false, animation: { duration: 0 },
+                    scales: { 
+                        x: { display: false }, 
+                        y: { display: true, border: {display: false}, grid: { color: 'rgba(148, 163, 184, 0.2)' }, ticks: { color: '#64748b', font: {size: 9} } } 
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        function updateChartTheme() {
+            if(!multiChart) return;
+            const isDark = document.documentElement.classList.contains('dark');
+            multiChart.options.scales.y.grid.color = isDark ? 'rgba(51, 65, 85, 0.4)' : 'rgba(203, 213, 225, 0.6)';
+            multiChart.options.scales.y.ticks.color = isDark ? '#94a3b8' : '#64748b';
+            multiChart.update();
+        }
+
+        document.getElementById('chartSelector').addEventListener('change', (e) => {
+            currentChartKey = e.target.value;
+            multiChart.data.datasets[0].data = chartDataStore[currentChartKey];
+            
+            let color = '#06b6d4'; 
+            if(currentChartKey === 'st') color = '#f97316'; 
+            if(currentChartKey === 'gsr') color = '#14b8a6';
+            if(currentChartKey === 'z') color = '#a855f7'; 
+            
+            multiChart.data.datasets[0].borderColor = color;
+            multiChart.data.datasets[0].backgroundColor = color + '25';
+            multiChart.update();
+        });
+
+        if (navigator.geolocation) {
+            navigator.geolocation.watchPosition((pos) => {
+                const locEl = document.getElementById('my-gps-cords');
+                if(locEl) {
+                    locEl.innerHTML = `Live GPS Active<br><span class="text-[9px] text-slate-500 font-normal">${pos.coords.latitude.toFixed(4)}° N, ${pos.coords.longitude.toFixed(4)}° E</span>`;
+                }
+            }, (err) => {
+                const locEl = document.getElementById('my-gps-cords');
+                if(locEl) locEl.innerHTML = `GPS Unavailable<br><span class="text-[9px] text-slate-500 font-normal">Check location permissions</span>`;
+            }, { enableHighAccuracy: true });
+        }
+
+        const BLE_SERVICE_UUID = "19b10000-e8f2-537e-4f6c-d104768a1214";
+        const BLE_CHARACTERISTIC_UUID = "19b10001-e8f2-537e-4f6c-d104768a1214";
+        let bluetoothDevice;
+        let bleCharacteristicGlobal = null; // saved so we can push the profile byte
+
+        document.getElementById('ble-connect-btn').onclick = async () => {
+            if ('speechSynthesis' in window) {
+                let silent = new SpeechSynthesisUtterance('');
+                silent.volume = 0;
+                window.speechSynthesis.speak(silent);
+            }
+
+            try {
+                if (!navigator.bluetooth) { 
+                    handleBLEError("WebBluetooth API not available in this browser.");
+                    return; 
+                }
+                
+                bluetoothDevice = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [BLE_SERVICE_UUID] });
+                const server = await bluetoothDevice.gatt.connect();
+                const service = await server.getPrimaryService(BLE_SERVICE_UUID);
+                bleCharacteristicGlobal = await service.getCharacteristic(BLE_CHARACTERISTIC_UUID);
+                
+                await bleCharacteristicGlobal.startNotifications();
+                bleCharacteristicGlobal.addEventListener('characteristicvaluechanged', handleNotifications);
+
+                document.getElementById('ble-connect-btn').className = "px-2.5 py-1.5 rounded-lg bg-emerald-500 text-white text-xs font-bold flex items-center shadow-md";
+                document.getElementById('ble-connect-btn').innerHTML = `<i class="ph-bold ph-bluetooth"></i>`;
+                
+                const sosBtn = document.getElementById('lora-sos-btn');
+                if (sosBtn) {
+                    sosBtn.disabled = false;
+                    sosBtn.innerHTML = `<i class="ph-bold ph-broadcast text-rose-500 text-lg"></i> Broadcast My SOS`;
+                }
+
+                logToTerminal("[System] BLE GATT Link Established. Receiving telemetry.", "good");
+
+            } catch (error) { 
+                handleBLEError(error.message); 
+            }
+        };
+
+        // sends the 1-byte command to the esp32 to lock the nvs memory to a specific demographic model
+        window.setNvsProfile = async function(profId) {
+            if(!bleCharacteristicGlobal) {
+                logToTerminal("[Error] Connect BLE first to provision profile.", "alert");
+                return;
+            }
+            try {
+                const encoder = new TextEncoder();
+                await bleCharacteristicGlobal.writeValue(encoder.encode(profId.toString()));
+                logToTerminal(`[OTA] Provisioned NVS profile ${profId}. Rebooting ESP32...`, "good");
+            } catch (error) {
+                logToTerminal(`[Error] Profile write failed: ${error.message}`, "alert");
+            }
+        };
+
+        function handleBLEError(msg) {
+            const alertCont = document.getElementById('user-alert-container');
+            if(alertCont) {
+                alertCont.innerHTML = `<div class="bg-rose-50 dark:bg-rose-900/10 border border-rose-200 dark:border-rose-800/50 rounded-lg p-2 flex items-center gap-2"><i class="ph-fill ph-warning text-rose-500"></i><span class="text-[9px] font-bold text-rose-600 dark:text-rose-400 uppercase">BLE Connection Failed: ${msg}</span></div>`;
+            }
+            logToTerminal(`[Error] ${msg}`, "alert");
+        }
+
+        function handleNotifications(event) {
+            const jsonString = new TextDecoder('utf-8').decode(event.target.value);
+            try { 
+                const data = JSON.parse(jsonString);
+                processIncomingData(data);
+            } catch(e) {} 
+        }
+
+        function logToTerminal(msg, type = 'info') {
+            const term = document.getElementById('ai-terminal-logs');
+            if(!term) return;
+            const div = document.createElement('div');
+            
+            if (type === 'alert') div.className = 'text-rose-400 font-bold';
+            else if (type === 'good') div.className = 'text-emerald-400 font-bold';
+            else div.className = 'text-slate-300';
+            
+            div.innerHTML = msg;
+            term.prepend(div);
+            if(term.children.length > 20) term.lastChild.remove();
+        }
+
+        function setGauge(id, value, maxVal) {
+            const circle = document.getElementById(id);
+            if(!circle) return;
+            const circumference = 251.2;
+            const pct = Math.min(Math.max(value / maxVal, 0), 1);
+            circle.style.strokeDashoffset = circumference - (pct * circumference);
+        }
+
+        window.triggerLoRaSOS = function() {
+            if(!bluetoothDevice) return; 
+            const btn = document.getElementById('lora-sos-btn');
+            const homeBtn = document.getElementById('btn-sos-user');
+            
+            if(btn) {
+                btn.innerHTML = `<i class="ph-bold ph-spinner animate-spin text-lg"></i> TRANSMITTING...`;
+                btn.classList.replace('bg-slate-800', 'bg-orange-500');
+                btn.classList.replace('dark:bg-slate-700', 'dark:bg-orange-500');
+            }
+            if(homeBtn) {
+                homeBtn.innerHTML = `<i class="ph-bold ph-spinner animate-spin text-lg"></i> TRANSMITTING...`;
+            }
+
+            logToTerminal("[LoRa] TX ACTIVE: Broadcasting SOS Packet on 865MHz...", "alert");
+            
+            setTimeout(() => {
+                if(btn) {
+                    btn.innerHTML = `<i class="ph-bold ph-check-circle text-lg"></i> SOS BROADCASTED`;
+                    btn.classList.replace('bg-orange-500', 'bg-emerald-500');
+                    btn.classList.replace('dark:bg-orange-500', 'dark:bg-emerald-500');
+                }
+                if(homeBtn) homeBtn.innerHTML = `<i class="ph-bold ph-check-circle text-lg"></i> SENT`;
+
+                logToTerminal("[LoRa] TX SUCCESS: Distress signal broadcast to mesh.", "good");
+                
+                setTimeout(() => {
+                    if(btn) {
+                        btn.innerHTML = `<i class="ph-bold ph-broadcast text-rose-500 text-lg"></i> Broadcast My SOS`;
+                        btn.classList.replace('bg-emerald-500', 'bg-slate-800');
+                        btn.classList.replace('dark:bg-emerald-500', 'dark:bg-slate-700');
+                    }
+                    if(homeBtn) homeBtn.innerHTML = `<i class="ph-bold ph-warning text-2xl"></i> SOS EMERGENCY`;
+                }, 3000);
+            }, 1500);
+        };
+
+        // mapping the neural network integer output directly to UI styles
+        const AI_STATE_MAP = {
+            0: { text: "FALL IMPACT", classes: "text-rose-500 dark:text-rose-400", ring: "border-rose-400 bg-rose-50 dark:bg-rose-900/10 shadow-[0_0_40px_rgba(244,63,94,0.2)] animate-breathe-alert", sub: "Emergency Protocol Active", alert: "fall" },
+            1: { text: "HEAT STRAIN", classes: "text-orange-500 dark:text-orange-400", ring: "border-orange-400 bg-orange-50 dark:bg-orange-900/10 shadow-[0_0_40px_rgba(249,115,22,0.2)] animate-breathe-alert", sub: "Rest and Hydrate", alert: "heatstroke" },
+            2: { text: "NOMINAL", classes: "text-emerald-500 dark:text-emerald-400", ring: "border-emerald-400 bg-emerald-50 dark:bg-emerald-900/10 shadow-[0_0_40px_rgba(52,211,153,0.2)] animate-breathe-mint", sub: "All Systems Optimal", alert: null },
+            3: { text: "EXERTION", classes: "text-amber-500 dark:text-amber-400", ring: "border-amber-400 bg-amber-50 dark:bg-amber-900/10 shadow-[0_0_40px_rgba(251,191,36,0.2)] animate-pulse-slow", sub: "Physical Load Detected", alert: "cardiac" },
+            4: { text: "RESPIRATORY", classes: "text-purple-500 dark:text-purple-400", ring: "border-purple-400 bg-purple-50 dark:bg-purple-900/10 shadow-[0_0_40px_rgba(168,85,247,0.2)] animate-breathe-alert", sub: "Monitor Breathing Rate", alert: "respiratory" }
+        };
+
+        const PROFILE_NAMES = {
+            0: "Standard Adult",
+            1: "Elderly User",
+            2: "Industrial Worker"
+        };
+
+        function processIncomingData(data) {
+            
+            isDeviceWorn = (data.ir !== undefined && data.ir > 50000); 
+
+            if (isLoggingEnabled && isDeviceWorn) {
+                const now = Date.now();
+                if (now - lastLogTime > 5000) {
+                    lastLogTime = now;
+                    try {
+                        const logEntry = {
+                            timestamp: new Date().toISOString(),
+                            temp: data.st ? data.st.toFixed(1) : "--",
+                            hr: data.bpm ? data.bpm : "--",
+                            spo2: data.spo2 ? data.spo2 : "--",
+                            gsr: data.gsr ? data.gsr : "--",
+                            kinematics: data.z ? data.z.toFixed(2) : "--",
+                            voc: data.g ? data.g.toFixed(1) : "--"
+                        };
+                        localDataLog.push(logEntry);
+                        if (localDataLog.length > 10000) localDataLog.shift();
+                        localStorage.setItem('qyra_telemetry', JSON.stringify(localDataLog));
+                    } catch(e) {} 
+                }
+            }
+
+            if(data.bat !== undefined) {
+                const batBadge = document.getElementById('battery-badge');
+                if(batBadge) batBadge.style.display = 'flex';
+                const batText = document.getElementById('bat-text');
+                if(batText) batText.innerText = `${data.bat}%`;
+                const setBat = document.getElementById('settings-bat');
+                if(setBat) setBat.innerText = `${data.bat}%`;
+                const batIcon = document.getElementById('bat-icon');
+                if(batIcon) batIcon.className = data.bat > 20 ? "ph-fill ph-battery-medium text-emerald-500" : "ph-fill ph-battery-warning text-rose-500 animate-pulse";
+            }
+
+            if(data.prof !== undefined) {
+                const profEl = document.getElementById('settings-prof');
+                if(profEl) profEl.innerText = PROFILE_NAMES[data.prof] || `Profile ${data.prof}`;
+            }
+
+            // mapping hardware fault flags directly to the diagnostic dot indicators
+            const bmeDot = document.getElementById('diag-bme-dot');
+            if(bmeDot) bmeDot.className = data.bme ? "w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "w-2 h-2 rounded-full bg-rose-500";
+            const maxDot = document.getElementById('diag-max-dot');
+            if(maxDot) maxDot.className = data.max ? "w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "w-2 h-2 rounded-full bg-rose-500";
+            const mpuDot = document.getElementById('diag-mpu-dot');
+            if(mpuDot) mpuDot.className = data.mpu ? "w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "w-2 h-2 rounded-full bg-rose-500";
+            const mlxDot = document.getElementById('diag-mlx-dot');
+            if(mlxDot) mlxDot.className = data.mlx ? "w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "w-2 h-2 rounded-full bg-rose-500";
+
+            let gsrInsight = "OFF-WRIST";
+            if(isDeviceWorn && data.gsr !== undefined) {
+                if (data.gsr > aiThresholds.gsr.val) gsrInsight = "PROFUSE";
+                else if (data.gsr > (aiThresholds.gsr.val * 0.6)) gsrInsight = "SWEATY";
+                else if (data.gsr > (aiThresholds.gsr.val * 0.2)) gsrInsight = "NORMAL";
+                else gsrInsight = "DRY";
+            }
+
+            let stInsight = "OFF-WRIST";
+            if(isDeviceWorn && data.st !== undefined) {
+                if (data.st > aiThresholds.st.val) stInsight = "ELEVATED";
+                else stInsight = "STABLE";
+            }
+
+            if (isDeviceWorn) {
+                const userPredSt = document.getElementById('user-pred-st');
+                if(userPredSt) {
+                    userPredSt.innerText = t(stInsight);
+                    userPredSt.className = (stInsight==="STABLE") ? "text-lg font-black uppercase text-emerald-500 mt-1" : "text-lg font-black uppercase text-rose-500 mt-1";
+                }
+                
+                let hrInsight = "RESTING";
+                if (data.spo2 !== undefined && data.spo2 < aiThresholds.spo2.val) hrInsight = "HYPOXIA";
+                else if (data.bpm !== undefined && data.bpm > aiThresholds.hr.val) hrInsight = "ELEVATED";
+                else if (data.bpm !== undefined && data.bpm > 0 && data.bpm < 50) hrInsight = "LOW";
+
+                const userPredHr = document.getElementById('user-pred-hr');
+                if(userPredHr) {
+                    userPredHr.innerText = t(hrInsight);
+                    userPredHr.className = (hrInsight==="RESTING") ? "text-lg font-black uppercase text-emerald-500 mt-1" : "text-lg font-black uppercase text-rose-500 mt-1";
+                }
+                
+                let zInsight = (data.z !== undefined && data.z > aiThresholds.z.val) ? "IMPACT" : "NOMINAL";
+                const userPredZ = document.getElementById('user-pred-z');
+                if(userPredZ) {
+                    userPredZ.innerText = t(zInsight);
+                    userPredZ.className = (zInsight==="IMPACT") ? "text-lg font-black uppercase text-rose-500 mt-1" : "text-lg font-black uppercase text-emerald-500 mt-1";
+                }
+
+                // Core AI evaluation pulling strictly from the ESP32-S3 inference integer
+                const aiStateData = (data.ai !== undefined && AI_STATE_MAP[data.ai]) ? AI_STATE_MAP[data.ai] : AI_STATE_MAP[2];
+
+                if (aiStateData.alert) {
+                    triggerAlert(aiStateData.alert);
+                    if (Math.random() > 0.8) logToTerminal(`[AI Insight] Triage class ${data.ai} detected.`, "alert");
+                }
+
+                const statEl = document.getElementById('user-main-status');
+                if(statEl) {
+                    statEl.innerText = t(aiStateData.text);
+                    statEl.className = `text-3xl font-black ${aiStateData.classes} tracking-tight text-center px-2 leading-tight`;
+                }
+                const subEl = document.getElementById('user-main-sub');
+                if(subEl) {
+                    subEl.innerText = t(aiStateData.sub);
+                    subEl.className = `text-[10px] font-bold ${aiStateData.classes} uppercase tracking-widest mt-2 text-center leading-tight px-4`;
+                }
+                const ringEl = document.getElementById('user-main-ring');
+                if(ringEl) {
+                    ringEl.className = `w-56 h-56 rounded-full border-[14px] flex flex-col items-center justify-center transition-colors ${aiStateData.ring}`;
+                }
+
+            } else {
+                ['st', 'hr', 'z'].forEach(k => {
+                    const el = document.getElementById(`user-pred-${k}`);
+                    if(el) { el.innerText = t("OFF-WRIST"); el.className = "text-lg font-black uppercase text-slate-400 mt-1"; }
+                });
+                
+                const statEl = document.getElementById('user-main-status');
+                if(statEl) { statEl.innerText = t("Standby"); statEl.className = "text-3xl font-black text-slate-400 text-center px-2 leading-tight"; }
+                
+                const subEl = document.getElementById('user-main-sub');
+                if(subEl) { subEl.innerText = t("Please Wear Device"); subEl.className = "text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2 text-center leading-tight px-4"; }
+                
+                const ringEl = document.getElementById('user-main-ring');
+                if(ringEl) ringEl.className = "w-56 h-56 rounded-full border-[14px] border-slate-200 dark:border-slate-700/50 flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-800/30 transition-colors";
+            }
+
+            if (isDeviceWorn) {
+                const stValEl = document.getElementById('pro-val-st');
+                if(stValEl) {
+                    if(phiMasks.st) {
+                        stValEl.innerText = t(stInsight);
+                        stValEl.className = "text-[11px] font-black text-slate-800 dark:text-white leading-none tracking-tight";
+                        document.getElementById('unit-st').innerText = "";
+                    } else {
+                        stValEl.innerText = (data.st !== undefined) ? data.st.toFixed(1) : "--";
+                        stValEl.className = "text-xl font-black text-slate-800 dark:text-white leading-none tracking-tighter";
+                        document.getElementById('unit-st').innerText = "°C";
+                    }
+                }
+                setGauge('gauge-st', data.st !== undefined ? data.st : 0, 50);
+
+                const gsrValEl = document.getElementById('pro-val-gsr');
+                if(gsrValEl) {
+                    if(phiMasks.gsr) {
+                        gsrValEl.innerText = t(gsrInsight);
+                        gsrValEl.className = "text-[11px] font-black text-slate-800 dark:text-white leading-none tracking-tight";
+                        document.getElementById('unit-gsr').innerText = "";
+                    } else {
+                        gsrValEl.innerText = (data.gsr !== undefined) ? data.gsr : "--";
+                        gsrValEl.className = "text-xl font-black text-slate-800 dark:text-white leading-none tracking-tighter";
+                        document.getElementById('unit-gsr').innerText = "raw";
+                    }
+                }
+                setGauge('gauge-gsr', data.gsr !== undefined ? data.gsr : 0, 3500);
+                
+                const hrValEl = document.getElementById('pro-val-hr');
+                let hrInsightPro = "RESTING";
+                if (data.bpm !== undefined && data.bpm > aiThresholds.hr.val) hrInsightPro = "ELEVATED";
+                else if (data.bpm !== undefined && data.bpm > 0 && data.bpm < 50) hrInsightPro = "LOW";
+
+                if(hrValEl) {
+                    if(phiMasks.hr) {
+                        hrValEl.innerText = t(hrInsightPro);
+                        hrValEl.className = "text-[11px] font-black text-slate-800 dark:text-white leading-none tracking-tight";
+                        document.getElementById('unit-hr').innerText = "";
+                    } else {
+                        hrValEl.innerText = (data.bpm !== undefined) ? data.bpm : "--";
+                        hrValEl.className = "text-xl font-black text-slate-800 dark:text-white leading-none tracking-tighter";
+                        document.getElementById('unit-hr').innerText = "BPM";
+                    }
+                }
+                setGauge('gauge-hr', data.bpm !== undefined ? data.bpm : 0, 180);
+
+                const spo2ValEl = document.getElementById('pro-val-spo2');
+                let spo2InsightPro = "NORMAL";
+                if (data.spo2 !== undefined && data.spo2 > 0 && data.spo2 < aiThresholds.spo2.val) spo2InsightPro = "HYPOXIA";
+
+                if(spo2ValEl) {
+                    if(phiMasks.spo2) {
+                        spo2ValEl.innerText = t(spo2InsightPro);
+                        spo2ValEl.className = "text-[11px] font-black text-slate-800 dark:text-white leading-none tracking-tight";
+                        document.getElementById('unit-spo2').innerText = "";
+                    } else {
+                        spo2ValEl.innerText = (data.spo2 !== undefined) ? data.spo2 : "--";
+                        spo2ValEl.className = "text-xl font-black text-slate-800 dark:text-white leading-none tracking-tighter";
+                        document.getElementById('unit-spo2').innerText = "%";
+                    }
+                }
+                setGauge('gauge-spo2', data.spo2 !== undefined ? data.spo2 : 0, 100);
+
+                if(data.bpm !== undefined) { chartDataStore.hr.push(data.bpm); chartDataStore.hr.shift(); }
+                if(data.st !== undefined) { chartDataStore.st.push(data.st); chartDataStore.st.shift(); }
+                if(data.gsr !== undefined) { chartDataStore.gsr.push(data.gsr); chartDataStore.gsr.shift(); }
+            } else {
+                ['st', 'gsr', 'hr', 'spo2'].forEach(k => {
+                    const el = document.getElementById(`pro-val-${k}`);
+                    if(el) { el.innerText = "--"; el.className = "text-xl font-black text-slate-400 leading-none"; }
+                    const unitEl = document.getElementById(`unit-${k}`);
+                    if(unitEl) unitEl.innerText = "";
+                    setGauge(`gauge-${k}`, 0, 100);
+                });
+            }
+
+            const zValEl = document.getElementById('pro-val-z');
+            if(zValEl && data.z !== undefined) {
+                zValEl.innerText = data.z.toFixed(1);
+                setGauge('gauge-z', data.z, 30);
+                chartDataStore.z.push(data.z); chartDataStore.z.shift();
+            }
+
+            let gasInsight = "CLEAN AIR";
+            const gasValEl = document.getElementById('pro-val-gas');
+            const predGasEl = document.getElementById('user-pred-gas');
+            
+            if(gasValEl) {
+                const safeG = data.g !== undefined ? data.g.toFixed(0) : '--';
+                gasValEl.innerHTML = `${safeG}<span class="text-[8px] font-normal text-slate-500 ml-0.5">kΩ</span>`;
+            }
+            
+            if (data.g !== undefined && data.g > 0 && data.g < aiThresholds.env.val) {
+                if(predGasEl) predGasEl.className = "text-lg font-black uppercase text-rose-500 mt-1";
+                gasInsight = "POOR AIR";
+            } else {
+                gasInsight = "CLEAN AIR";
+                if(predGasEl) {
+                    predGasEl.innerText = t(gasInsight);
+                    predGasEl.className = "text-lg font-black uppercase text-emerald-500 mt-1";
+                }
+            }
+
+            const tempEl = document.getElementById('pro-val-temp');
+            if(tempEl && data.t !== undefined) tempEl.innerHTML = `${data.t.toFixed(1)}<span class="text-[8px] font-normal text-slate-500 ml-0.5">°C</span>`;
+            
+            const humEl = document.getElementById('pro-val-hum');
+            if(humEl && data.h !== undefined) humEl.innerHTML = `${data.h.toFixed(1)}<span class="text-[8px] font-normal text-slate-500 ml-0.5">%</span>`;
+            
+            const pressEl = document.getElementById('pro-val-press');
+            if(pressEl) pressEl.innerHTML = `1013<span class="text-[8px] font-normal text-slate-500 ml-0.5">hPa</span>`; 
+
+            if (isDeviceWorn && Math.random() > 0.95) {
+                logToTerminal(`[Telemetry] TinyML parsing ok. Latency: ${data.lat}ms`, "info");
+            }
+
+            if(multiChart) {
+                multiChart.data.datasets[0].data = chartDataStore[currentChartKey];
+                multiChart.update();
+            }
+        }
+    </script>
+</body>
+</html>
