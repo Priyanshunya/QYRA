@@ -1,6 +1,6 @@
 # QYRA Hardware & Physical Architecture of prototype v1
 
-This directory documents the physical design, dual-bus wiring topology, and components the QYRA ESP32-S3 wearable prototype. 
+This directory documents the physical design, dual-bus wiring topology, and components for the QYRA ESP32-S3 wearable prototype. 
 
 ### 📐 Circuit Schematic
 ![Circuit Schematic](./v1_prototype_schematic.jpeg)
@@ -19,7 +19,7 @@ To prevent high-frequency UI refreshes on the OLED screen from blocking the sens
 ### Prototype Assembly & Component Layout
 | Component Breakdown | Assembled Prototype (Front) | Assembled Prototype (Back) |
 | :---: | :---: | :---: |
-| ![Components](./v1_prototype_components.jpeg) | ![Front View](./v1_prototype_front.jpeg) | ![Back View](./v1_prototype_back.jpeg) |
+| ![Components](./v1_prototype_components.jpeg) | ![Front View](./v1_prototype_front.jpg) | ![Back View](./v1_prototype_back.jpg) |
 
 ### 📋 Bill of Materials (BOM)
 | Component | Function | Interface / Part |
@@ -30,5 +30,5 @@ To prevent high-frequency UI refreshes on the OLED screen from blocking the sens
 | **Kinematics** | 3-axis acceleration and impact tracking | MPU6050 Breakout |
 | **Environment** | Ambient gas, humidity, and temperature | BME680 Sensor Module |
 | **Display** | 4-quadrant local triage HUD | 1.3" SH1106G OLED |
-| **Off-Grid Mesh** | Long-range peer-to-peer disaster radio | SX1276 / RFM95 LoRa (865 MHz) |
+| **Off-Grid Mesh** | Long-range peer-to-peer disaster radio | SX1276 LoRa (865 MHz) |
 | **Power Management** | LiPo charging & safe ADC voltage step-down | TP4056 + Resistor Divider |
