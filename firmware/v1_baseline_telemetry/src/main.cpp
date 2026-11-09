@@ -4,8 +4,8 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SH110X.h> 
 #include <Adafruit_BME680.h>
-#include <Adafruit_MLX90614.h> // using this for true non-contact skin temp now
-#include "MAX30105.h" // local sparkfun library for the max30102 pulse sensor
+#include <Adafruit_MLX90614.h> // using this for non-contact skin temp
+#include "MAX30105.h" // sparkfun library for the max30102 pulse sensor
 
 #include <BLEDevice.h>
 #include <BLEServer.h>
@@ -456,6 +456,6 @@ void setup() {
 }
 
 void loop() {
-  // critical: keeps the native esp32-s3 usb-cdc port alive so the computer can still upload new code without holding the boot button
+  // keeps the native esp32-s3 usb-cdc port alive so we can easily update codes without holding the boot button
   vTaskDelay(1000 / portTICK_PERIOD_MS); 
 }
