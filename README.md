@@ -2,54 +2,67 @@
 > **Smart India Hackathon 2026 | Team Vision.exe (Team ID: 162907) | PS 26181**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-ESP32--S3%20%7C%20FreeRTOS-blue)](https://www.espressif.com/)
+[![Platform](https://img.shields.io/badge/MVP-ESP32--S3-blue)](https://www.espressif.com/)
 [![Production Target](https://img.shields.io/badge/Production%20Target-Qualcomm%20QCC748M-orange)](https://www.qualcomm.com/)
 
 ---
 
-## 🚀 Overview
-**QYRA** is a secure, privacy-by-design edge wearable engineered to provide continuous physiological triage and reliable off-grid emergency communication during critical infrastructure failures, such as disaster-induced cellular blackouts. 
+## Overview: The QYRA Paradigm
+Conventional health wearables suffer from a fatal flaw: they become expensive paperweights the moment cloud connectivity drops, and they rely on flat, sensor thresholds that trigger way more false alarms. 
 
-Conventional health wearables suffer from cloud-dependency and single-sensor alarm fatigue. QYRA solves this via an **offline-first, multi-modal Edge-AI architecture** that processes biometrics locally on the wrist, protects user data under DPDP Act principles, and broadcasts encrypted SOS payloads via sub-GHz LoRa telemetry.
+**QYRA fundamentally re-engineers the medical assistive wearable for disaster zones, off-grid environments, and high-risk industrial sectors. It is a 100% offline, privacy-first Edge-AI triage ecosystem.**
 
----
+Instead of blindly streaming raw data to a server, QYRA acts as a miniaturized autonomous clinic on the wrist. By fusing clinical biometrics with kinematics and environmental gas data, its onboard TinyML neural network locally classifies complex physiological states—such as Heat Strain (PSI) and Respiratory Risk (RDI)—in real-time. When critical infrastructure fails, QYRA bypasses cellular networks entirely, leveraging a sub-GHz LoRa mesh to broadcast encrypted emergency payloads.
 
-## 🛠️ System Architecture & Tech Stack
-
-> **1. [ SENSE ]** ──> MAX86141 (SpO2/HR) | GSR | LSM6DSOX (IMU) | BME688 (Gas) | TMP117 (Temp)  
-> **2. [ COMPUTE ]** ──> ESP32-S3 running FreeRTOS (Dual-Bus Sensor Isolation)  
-> **3. [ AI INFERENCE ]** ──> INT8 Quantized TinyML (<100KB) + Motion-Aware CMSIS-DSP Filtering  
-> **4. [ ACTION & ALERT ]** ──> Local OLED + Buzzer | Flutter Mobile App | SX1262 LoRa (IN865)
-
----
-
-* **Microcontroller:** ESP32-S3 (Bench Prototype) / Qualcomm QCC748M (Production Target Roadmap).
-* **RTOS:** FreeRTOS with dual-bus sensor isolation (Clinical high-speed sensors on SPI/I2C Bus 0; Environmental/UI on Bus 1) to eliminate bus-choking and sustain real-time biometric polling.
-* **Framework:** ESP-IDF / PlatformIO.
-
-### 2. Edge AI & Signal Processing
-* **Inference Engine:** INT8-quantized TinyML model (<100 KB file size) executing locally on-device.
-* **Signal Conditioning:** Motion-aware signal-quality assessment utilizing optimized DSP libraries to mitigate kinetic artifacts from raw optical PPG and GSR streams before inference.
-* **Triage Modules:** 
-  * **PSI (Heat-Strain Engine):** Fuses ambient heat, activity, and physiological trends to screen escalating heat-strain risk.
-  * **RDI (Respiratory-Risk Engine):** Correlates SpO₂/HR trends with ambient air-quality context for respiratory advisories.
-
-### 3. Connectivity & Emergency Mesh
-* **Off-Grid Radio:** SX1262 LoRa transceiver configured for India's de-licensed **IN865 (865–867 MHz)** band (subject to WPC compliance pathways) alongside an ESP-NOW telemetry link.
-* **Companion App:** Flutter-based mobile dashboard providing real-time vitals, offline alerts, and a multilingual **"Voice Guard" TTS engine** for outdoor workforce accessibility.
+### Core Engineering Pillars
+* **Multi-Modal Edge AI:** Moves computation from the cloud to the silicon. An INT8-quantized TinyML model fuses 5 distinct sensor streams to eliminate heuristic false alarms.
+* **Hardware-Accelerated RTOS:** Utilizes an asymmetric dual-core FreeRTOS architecture with physically isolated I2C buses, guaranteeing that heavy UI rendering never interrupts high-frequency 50Hz medical polling.
+* **Zero-Infrastructure Mesh:** Deploys an SX1276 LoRa transceiver (IN865 MHz) to establish a decentralized, peer-to-peer SOS network independent of Wi-Fi, 4G, or 5G grids.
+* **Cryptographic Privacy (DPDP Compliant):** No cloud backend. Demographic models are provisioned securely into Non-Volatile Storage (NVS). Protected Health Information (PHI) never leaves the device.
 
 ---
 
-## 📊 Feasibility & Bill of Materials (BOM)
-* **Cost Efficiency:** Fully functional bench-prototype hardware achieved under an itemized **~Rs. 3,000 BOM**, offering a major CapEx advantage over commercial medical pendants for scalable emergency response deployment.
-* **Industrial Target:** The production roadmap evaluates the Qualcomm QCC748M tri-radio IoT SoC (325 MHz RISC-V MCU, hardware DSP/FPU, Bluetooth 5.4, Wi-Fi 6) targeting 7+ days of battery autonomy on a 500mAh LiPo cell inside a targeted IP67 rugged enclosure.
+## Physical Prototype & Hardware Architecture
+To prevent high-frequency OLED UI refreshes from choking the I2C clock and stalling the sensitive PPG sensor, the physical MVP hardware is split across two independent data buses on the ESP32-S3.
+
+* **I2C Bus 0 (Clinical - 100kHz):** Vitals and Kinematics.
+* **I2C Bus 1 (Environment & UI - 100kHz):** Ambient Gas/Temp/Humidity and 1.3" SH1106G OLED Display.
+
+### Circuit Schematic & Assembled Hardware
+| Circuit Schematic | Assembled Prototype (Front) | Assembled Prototype (Back) |
+| :---: | :---: | :---: |
+| ![Schematic](./hardware/v1_prototype_schematic.jpeg) | ![Front View](./hardware/v1_prototype_front.jpg) | ![Back View](./hardware/v1_prototype_back.jpg) |
+
+*(See the `hardware/` and `docs/` directories for detailed bus wiring topologies and architecture flowcharts.)*
 
 ---
 
-## 🔒 Privacy-by-Design (DPDP Aligned)
-* Routine physiological analysis occurs locally on the device.
-* Raw biometric numbers stay on the wearable by default; telemetry is abstracted into qualitative states (e.g., "STABLE", "ABNORMAL") before local transmission to the paired companion app.
-* Local SQLite storage is secured via hardware-backed AES-256 cryptographic vaulting.
+## Architecture: MVP vs. Production Roadmap
+To validate the architecture for the hackathon, we built a fully functional MVP using commercial off-the-shelf (COTS) components. However, our engineering architecture is designed to scale directly into a clinical-grade production pipeline utilizing advanced Qualcomm IoT SoCs and medical-grade optical front-ends.
+
+> **1. [ SENSE ]**
+> * **MVP (Current):** MAX30102 (SpO2/HR) | MPU6050 (IMU) | BME680 (Gas/Env) | MLX90614 (Temp) | Analog GSR
+> * **Production Vision:** MAX86141 (Clinical PPG) | LSM6DSOX (Motion) | BME688 (VOC/Env) | TMP117 (Skin Temp) | SPI/I2C Isolation
+
+> **2. [ COMPUTE & RTOS ]**
+> * **MVP (Current):** ESP32-S3 executing FreeRTOS with asymmetric dual-core task isolation and CMSIS-DSP motion-aware filtering.
+> * **Production Vision:** Qualcomm QCC748M Tri-Radio SoC for enhanced power efficiency and hardware-accelerated DSP.
+
+> **3. [ AI INFERENCE ]**
+> * **Edge Engine:** INT8-quantized TinyML models (<100KB) running locally. 
+> * **Triage Logic:** Lightweight temporal sliding-window anomaly detection and baseline deviation scoring. NVS provisioning locks the models to specific demographic profiles.
+
+> **4. [ ACTION & MESH ]**
+> * **Alerting:** Local OLED + Buzzer (Immediate alert, no network needed).
+> * **Off-Grid Telemetry:** SX1276 LoRa transceiver operating on the IN865 MHz band paired with ESP-NOW for decentralized rescue mesh broadcasting.
+> * **App Ecosystem:** Flutter Dart companion app with AES-256 local SQLite storage.
 
 ---
-*Disclaimer: QYRA is intended for preventive health awareness and emergency support, not as a substitute for clinical diagnosis or professional medical care.*
+
+## Privacy-by-Design (DPDP Aligned)
+* Routine physiological analysis occurs locally on the wearable.
+* Raw biometric numbers are masked by default via PHI (Protected Health Information) toggled by user.
+* Telemetry logs are stored securely with zero cloud-backend dependency.
+
+---
+*Disclaimer: QYRA is a prototype intended for preventive health awareness and disaster emergency support. It is not a substitute for professional clinical diagnosis.*
