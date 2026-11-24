@@ -14,6 +14,11 @@ Conventional health wearables suffer from a fatal flaw: they become expensive pa
 
 Instead of blindly streaming raw data to a server, QYRA acts as a miniaturized autonomous clinic on the wrist. By fusing clinical biometrics with kinematics and environmental gas data, its onboard TinyML neural network locally classifies complex physiological states—such as Heat Strain (PSI) and Respiratory Risk (RDI)—in real-time. When critical infrastructure fails, QYRA bypasses cellular networks entirely, leveraging a sub-GHz LoRa mesh to broadcast encrypted emergency payloads.
 
+### Android Companion App (Beta Available)
+
+- **Download APK:** [`qyra_v0.9_beta.apk` on Releases](https://github.com/Priyanshunya/QYRA/releases) (Android 8.0+)
+- **App Source & Notes:** [`app/`](./app/)
+
 ### Core Engineering Pillars
 * **Multi-Modal Edge AI:** Moves computation from the cloud to the silicon. An INT8-quantized TinyML model fuses 5 distinct sensor streams to eliminate heuristic false alarms.
 * **Hardware-Accelerated RTOS:** Utilizes an asymmetric dual-core FreeRTOS architecture with physically isolated I2C buses, guaranteeing that heavy UI rendering never interrupts high-frequency 50Hz medical polling.
